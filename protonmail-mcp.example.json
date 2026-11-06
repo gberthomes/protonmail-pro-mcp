@@ -1,0 +1,22 @@
+{
+  "bridge": {
+    "imap": { "host": "127.0.0.1", "port": 1143, "security": "starttls" },
+    "smtp": { "host": "127.0.0.1", "port": 1025, "security": "starttls" }
+  },
+  "accounts": [
+    {
+      "id": "perso",
+      "email": "me@proton.me",
+      "displayName": "Me",
+      "passwordEnv": "PROTON_PERSO_BRIDGE_PASSWORD",
+      "users": ["me@example.com"]
+    },
+    {
+      "id": "shop",
+      "email": "contact@myshop.example",
+      "username": "contact@myshop.example",
+      "passwordFile": "/run/secrets/proton_shop",
+      "users": ["me@example.com", "group:shop-team"]
+    }
+  ]
+}

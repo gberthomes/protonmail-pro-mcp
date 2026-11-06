@@ -33,3 +33,6 @@ parallel-test.js
 temp/
 tmp/
 *.tmp
+# Local configuration and server state
+protonmail-mcp.json
+data/

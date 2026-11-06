@@ -1,0 +1,8 @@
+# Automatic HTTPS (Let's Encrypt) in front of the MCP server.
+{$MCP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy mcp:3000 {
+		# keep SSE responses streaming
+		flush_interval -1
+	}
+}

@@ -1,0 +1,51 @@
+# Remote Proton Mail MCP over HTTPS with OIDC sign-in.
+#
+#   1. cp .env.example .env   and fill it in
+#   2. docker compose run --rm protonmail-bridge init      (then: login, info — see README)
+#   3. docker compose up -d
+#
+# Clients connect to https://$MCP_DOMAIN/mcp
+services:
+  protonmail-bridge:
+    # Community image running the official Proton Mail Bridge headless.
+    image: shenxn/protonmail-bridge:latest
+    restart: unless-stopped
+    volumes:
+      - bridge:/root
+
+  mcp:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PUBLIC_URL: https://${MCP_DOMAIN}
+      PROTONMAIL_IMAP_HOST: protonmail-bridge
+      PROTONMAIL_IMAP_PORT: "143"
+      PROTONMAIL_SMTP_HOST: protonmail-bridge
+      PROTONMAIL_SMTP_PORT: "25"
+      TRUST_PROXY: "uniquelocal"
+    volumes:
+      - mcp-data:/data
+      # Optional multi-account file:
+      # - ./protonmail-mcp.json:/app/protonmail-mcp.json:ro
+    depends_on:
+      - protonmail-bridge
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MCP_DOMAIN: ${MCP_DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - mcp
+
+volumes:
+  bridge:
+  mcp-data:
+  caddy-data:

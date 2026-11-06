@@ -1,7 +1,7 @@
 {
-  "name": "@sirency/protonmail-pro-mcp",
-  "version": "1.0.0",
-  "description": "🌟 The Ultimate ProtonMail MCP by The Sirency Collective - Professional email management with 20+ tools, advanced analytics, and seamless Proton Bridge integration.",
+  "name": "protonmail-pro-mcp",
+  "version": "2.0.0",
+  "description": "Proton Mail MCP server (via Proton Mail Bridge): stdio and Streamable HTTP/HTTPS (MCP 2026-07-28 + 2025 clients), built-in OIDC authorization, multi-account.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -9,64 +9,66 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
+    "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "node test.js",
-    "prepare": "npm run build",
+    "start:http": "node dist/index.js --http",
     "lint": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "test": "node --import tsx --test test/*.test.ts",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build"
   },
   "keywords": [
     "protonmail",
+    "proton",
     "mcp",
+    "model-context-protocol",
     "email",
-    "sirency",
-    "automation",
-    "typescript",
-    "claude",
-    "ai",
-    "productivity",
-    "bridge",
-    "smtp",
     "imap",
-    "analytics",
-    "professional"
+    "smtp",
+    "bridge",
+    "oidc",
+    "oauth"
   ],
-  "author": {
-    "name": "The Sirency Collective",
-    "email": "contact@sirency.com",
-    "url": "https://sirency.com"
-  },
+  "author": "gberthomes",
   "license": "MIT",
-  "homepage": "https://github.com/anyrxo/protonmail-pro-mcp#readme",
+  "homepage": "https://github.com/gberthomes/protonmail-pro-mcp#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/anyrxo/protonmail-pro-mcp.git"
+    "url": "git+https://github.com/gberthomes/protonmail-pro-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/anyrxo/protonmail-pro-mcp/issues"
+    "url": "https://github.com/gberthomes/protonmail-pro-mcp/issues"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
-    "imapflow": "^1.0.164",
-    "mailparser": "^3.7.1",
-    "nodemailer": "^6.9.15"
+    "@modelcontextprotocol/express": "^2.0.2",
+    "@modelcontextprotocol/node": "^2.1.2",
+    "@modelcontextprotocol/server": "^2.4.0",
+    "@modelcontextprotocol/server-legacy": "^2.4.0",
+    "express": "^5.3.0",
+    "imapflow": "^1.7.8",
+    "jose": "^6.2.15",
+    "mailparser": "^3.14.2",
+    "nodemailer": "^10.3.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
-    "@types/nodemailer": "^6.4.19",
-    "typescript": "^5.7.2"
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@types/express": "^5.0.6",
+    "@types/mailparser": "^3.9.0",
+    "@types/node": "^22.20.5",
+    "@types/nodemailer": "^8.0.2",
+    "@types/smtp-server": "^3.5.13",
+    "hoodiecrow-imap": "^2.1.0",
+    "smtp-server": "^3.21.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
   },
   "files": [
     "dist/**/*",
     "README.md",
-    "FINAL-VALIDATION.md",
-    "package.json"
-  ],
-  "publishConfig": {
-    "access": "public"
-  }
+    "protonmail-mcp.example.json"
+  ]
 }

@@ -74,6 +74,8 @@ export interface HttpConfig {
   allowedOrigins: string[];
   trustProxy: string | boolean;
   legacySse: boolean;
+  /** Serve the web interface at /admin. */
+  webUi: boolean;
 }
 
 export interface AuthConfig {
@@ -83,6 +85,12 @@ export interface AuthConfig {
   apiKeys: Map<string, string>;
   /** Global allow-list, applies to accounts that do not define `users`. */
   allowedUsers: string[];
+  /** Administrators of the web interface (defaults to allowedUsers). */
+  adminUsers: string[];
+  /** Allowed users may add their own Proton accounts in the web interface. */
+  selfService: boolean;
+  /** Key encrypting Bridge passwords of accounts added in the web interface. */
+  encryptionKey?: string;
   accessTokenTtl: number;
   refreshTokenTtl: number;
   allowDynamicRegistration: boolean;
@@ -94,6 +102,8 @@ export interface AuthConfig {
 export interface AppConfig {
   transport: 'stdio' | 'http';
   accounts: AccountConfig[];
+  /** Bridge endpoints used for accounts that do not override them. */
+  bridge: { imap: Endpoint; smtp: Endpoint };
   http: HttpConfig;
   auth: AuthConfig;
   dataDir: string;
@@ -329,7 +339,8 @@ export function loadConfig(argv: string[] = process.argv.slice(2)): AppConfig {
           ? 'http'
           : 'stdio';
 
-  const accounts = loadAccounts(defaultEndpoints());
+  const bridge = defaultEndpoints();
+  const accounts = loadAccounts(bridge);
 
   const port = envInt('PORT', envInt('MCP_PORT', 3000));
   const host = env('HOST') ?? env('MCP_HOST') ?? '127.0.0.1';
@@ -356,7 +367,8 @@ export function loadConfig(argv: string[] = process.argv.slice(2)): AppConfig {
     allowedHosts: [...new Set([publicUrl.hostname, 'localhost', '127.0.0.1', '[::1]', ...list(env('MCP_ALLOWED_HOSTS'))])],
     allowedOrigins: list(env('MCP_ALLOWED_ORIGINS')),
     trustProxy,
-    legacySse: envBool('MCP_LEGACY_SSE', true)
+    legacySse: envBool('MCP_LEGACY_SSE', true),
+    webUi: envBool('MCP_WEB_UI', true)
   };
 
   // ---- auth
@@ -399,6 +411,9 @@ export function loadConfig(argv: string[] = process.argv.slice(2)): AppConfig {
     oidc,
     apiKeys,
     allowedUsers: list(env('MCP_ALLOWED_USERS') ?? env('OIDC_ALLOWED_USERS')),
+    adminUsers: list(env('MCP_ADMIN_USERS') ?? env('MCP_ALLOWED_USERS') ?? env('OIDC_ALLOWED_USERS')),
+    selfService: envBool('MCP_SELF_SERVICE', true),
+    encryptionKey: env('MCP_ENCRYPTION_KEY'),
     accessTokenTtl: envInt('MCP_ACCESS_TOKEN_TTL', 3600),
     refreshTokenTtl: envInt('MCP_REFRESH_TOKEN_TTL', 60 * 60 * 24 * 30),
     allowDynamicRegistration: envBool('MCP_ALLOW_DYNAMIC_REGISTRATION', true),
@@ -410,7 +425,7 @@ export function loadConfig(argv: string[] = process.argv.slice(2)): AppConfig {
     env('MCP_DATA_DIR') ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'protonmail-pro-mcp')
   );
 
-  return { transport, accounts, http, auth, dataDir };
+  return { transport, accounts, bridge, http, auth, dataDir };
 }
 
 export function isLoopbackHost(host: string): boolean {

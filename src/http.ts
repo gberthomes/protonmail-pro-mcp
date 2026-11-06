@@ -21,6 +21,7 @@ import { toNodeHandler } from '@modelcontextprotocol/node';
 import { createMcpHandler, localhostAllowedOrigins, OAuthError, OAuthErrorCode, type AuthInfo, type OAuthTokenVerifier } from '@modelcontextprotocol/server';
 import { SSEServerTransport } from '@modelcontextprotocol/server-legacy/sse';
 
+import { adminRouter } from './admin/router.js';
 import { OidcProvider } from './auth/oidc.js';
 import { MCP_SCOPE, OAuthBridge } from './auth/oauth-server.js';
 import { LOCAL_PRINCIPAL, type Principal } from './auth/principal.js';
@@ -55,7 +56,7 @@ export async function startHttp(config: AppConfig, deps: ServerDeps): Promise<Ru
     );
   }
   if (authEnabled && deps.policy.hasNoRules() && auth.mode !== 'none') {
-    log.warn('No access rule configured (MCP_ALLOWED_USERS or per-account "users"): every OIDC login will be refused.');
+    log.warn('No access rule configured (MCP_ALLOWED_USERS / MCP_ADMIN_USERS or per-account "users"): every OIDC login will be refused.');
   }
 
   const app = createMcpExpressApp({
@@ -122,7 +123,7 @@ export async function startHttp(config: AppConfig, deps: ServerDeps): Promise<Ru
         const audience = auth.oidc!.audience ?? mcpUrl.href;
         try {
           const { payload, principal } = await upstream.verifyAccessToken(token, audience);
-          if (deps.policy.accountsFor(principal).length === 0) throw new Error('no account');
+          if (!deps.policy.mayConnect(principal)) throw new Error('no account');
           return {
             token,
             clientId: String(payload.client_id ?? payload.azp ?? ''),
@@ -171,16 +172,30 @@ export async function startHttp(config: AppConfig, deps: ServerDeps): Promise<Ru
     res.json({ status: 'ok', version: VERSION });
   });
 
-  app.get('/', (_req, res) => {
+  app.get('/', (req, res) => {
+    if (http.webUi && req.accepts(['json', 'html']) === 'html') {
+      res.redirect(302, '/admin');
+      return;
+    }
     res.json({
       name: 'protonmail-pro-mcp',
       version: VERSION,
       mcp: mcpUrl.href,
       legacySse: http.legacySse ? sseUrl.href : undefined,
       auth: auth.mode === 'none' ? (apiKeys.length ? 'api-key' : 'none') : auth.mode,
-      accounts: deps.registry.all().length
+      admin: http.webUi ? `${base}/admin` : undefined,
+      accounts: deps.registry.count()
     });
   });
+
+  // ---------------------------------------------------------------- web interface
+
+  const localMode = !authEnabled && isLoopbackHost(http.host);
+  if (http.webUi) {
+    app.use(adminRouter({ config, directory: deps.directory, policy: deps.policy, bridge, localMode }));
+    deps.adminUrl = `${base}/admin`;
+    if (!bridge && !localMode) log.info('Web interface disabled: it needs MCP_AUTH=oidc (or a loopback server without authentication).');
+  }
 
   // ---------------------------------------------------------------- Streamable HTTP
 
@@ -245,7 +260,8 @@ export async function startHttp(config: AppConfig, deps: ServerDeps): Promise<Ru
 
   const scheme = http.tlsCertFile ? 'https' : 'http';
   log.info(`Listening on ${scheme}://${http.host}:${http.port} — public MCP endpoint ${mcpUrl.href}`);
-  log.info(`Auth: ${auth.mode}${apiKeys.length ? ` + ${apiKeys.length} API key(s)` : ''}; accounts: ${deps.registry.all().map(a => a.id).join(', ') || 'none'}`);
+  log.info(`Auth: ${auth.mode}${apiKeys.length ? ` + ${apiKeys.length} API key(s)` : ''}; accounts: ${deps.directory.list().map(a => a.id).join(', ') || 'none'}`);
+  if (http.webUi && (bridge || localMode)) log.info(`Web interface: ${base}/admin`);
   if (http.publicUrl.protocol !== 'https:' && !isLoopbackHost(http.publicUrl.hostname)) {
     log.warn('PUBLIC_URL is not HTTPS: MCP clients will refuse OAuth. Use TLS_CERT_FILE/TLS_KEY_FILE or a TLS reverse proxy.');
   }

@@ -16,6 +16,7 @@ import type Mail from 'nodemailer/lib/mailer/index.js';
 
 import type { AccountConfig, Endpoint } from '../config.js';
 import { createLogger } from '../logger.js';
+import type { AccountDirectory } from './directory.js';
 
 const log = createLogger('mail');
 
@@ -205,6 +206,8 @@ export class ProtonAccount {
         return client;
       })
       .catch(err => {
+        // A failed login leaves the socket open: close it explicitly.
+        client.close();
         throw new Error(
           `Cannot connect to IMAP for account "${this.id}" at ${imap.host}:${imap.port} — is Proton Mail Bridge running and are the Bridge credentials correct? (${err instanceof Error ? err.message : String(err)})`
         );
@@ -614,22 +617,50 @@ export class ProtonAccount {
   }
 }
 
+/**
+ * Live connections, keyed by account id, created lazily from the directory and
+ * recreated when an account's settings change.
+ */
 export class AccountRegistry {
-  private readonly accounts = new Map<string, ProtonAccount>();
+  private readonly accounts = new Map<string, { fingerprint: string; account: ProtonAccount }>();
 
-  constructor(configs: AccountConfig[]) {
-    for (const c of configs) this.accounts.set(c.id, new ProtonAccount(c));
+  constructor(private readonly directory: AccountDirectory) {
+    directory.onChange(() => this.sync());
+  }
+
+  private static fingerprint(c: AccountConfig): string {
+    return JSON.stringify([c.email, c.displayName, c.username, c.password, c.imap, c.smtp]);
+  }
+
+  /** Close connections of removed or modified accounts. */
+  private sync(): void {
+    const current = new Map(this.directory.list().map(c => [c.id, AccountRegistry.fingerprint(c)]));
+    for (const [id, entry] of this.accounts) {
+      if (current.get(id) !== entry.fingerprint) {
+        void entry.account.close();
+        this.accounts.delete(id);
+      }
+    }
   }
 
   get(id: string): ProtonAccount | undefined {
-    return this.accounts.get(id);
+    const cfg = this.directory.get(id);
+    if (!cfg) return undefined;
+    const fp = AccountRegistry.fingerprint(cfg);
+    const existing = this.accounts.get(id);
+    if (existing && existing.fingerprint === fp) return existing.account;
+    if (existing) void existing.account.close();
+    const account = new ProtonAccount(cfg);
+    this.accounts.set(id, { fingerprint: fp, account });
+    return account;
   }
 
-  all(): ProtonAccount[] {
-    return [...this.accounts.values()];
+  count(): number {
+    return this.directory.list().length;
   }
 
   async closeAll(): Promise<void> {
-    await Promise.all(this.all().map(a => a.close()));
+    await Promise.all([...this.accounts.values()].map(e => e.account.close()));
+    this.accounts.clear();
   }
 }

@@ -68,6 +68,7 @@
   },
   "files": [
     "dist/**/*",
+    "public/**/*",
     "README.md",
     "protonmail-mcp.example.json"
   ]

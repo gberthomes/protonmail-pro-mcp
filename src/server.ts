@@ -12,11 +12,15 @@ import * as z from 'zod/v4';
 
 import { AccessPolicy, type Principal } from './auth/principal.js';
 import type { AccountRegistry, ProtonAccount } from './mail/account.js';
+import type { AccountDirectory } from './mail/directory.js';
 import { VERSION } from './version.js';
 
 export interface ServerDeps {
   registry: AccountRegistry;
   policy: AccessPolicy;
+  directory: AccountDirectory;
+  /** Where users add accounts (HTTP mode with the web interface). */
+  adminUrl?: string;
 }
 
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
@@ -75,7 +79,11 @@ export function buildServer(principal: Principal, deps: ServerDeps): McpServer {
 
   const resolve = (account?: string): ProtonAccount => {
     if (allowed.length === 0) {
-      throw new Error('No Proton account is available to you. Ask the administrator to grant access (MCP_ALLOWED_USERS or the account "users" list).');
+      throw new Error(
+        deps.adminUrl && deps.policy.canSelfService(principal)
+          ? `No Proton account is configured for you yet. Add one at ${deps.adminUrl}`
+          : 'No Proton account is available to you. Ask the administrator to grant access (MCP_ALLOWED_USERS or the account "users" list).'
+      );
     }
     const wanted = account?.trim().toLowerCase();
     const cfg = wanted ? allowed.find(a => a.id === wanted || a.email === wanted) : defaultAccount;

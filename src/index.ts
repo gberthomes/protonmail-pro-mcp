@@ -13,6 +13,7 @@ import { loadConfig } from './config.js';
 import { startHttp } from './http.js';
 import { createLogger } from './logger.js';
 import { AccountRegistry } from './mail/account.js';
+import { AccountDirectory } from './mail/directory.js';
 import { buildServer } from './server.js';
 import { VERSION } from './version.js';
 
@@ -32,12 +33,21 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig(args);
-  if (config.accounts.length === 0) {
-    log.warn('No Proton account configured. Set PROTONMAIL_USERNAME and PROTONMAIL_PASSWORD (Bridge credentials) or see README.md for multi-account setup.');
+  const directory = new AccountDirectory(config.accounts, config.dataDir, config.auth.encryptionKey);
+  if (directory.list().length === 0) {
+    log.warn(
+      config.transport === 'http'
+        ? 'No Proton account configured yet: add one in the web interface (/admin) or with environment variables (see README.md).'
+        : 'No Proton account configured. Set PROTONMAIL_USERNAME and PROTONMAIL_PASSWORD (Bridge credentials), or add accounts with the web interface.'
+    );
   }
-  const registry = new AccountRegistry(config.accounts);
-  const policy = new AccessPolicy(config.accounts, config.auth.allowedUsers);
-  const deps = { registry, policy };
+  const registry = new AccountRegistry(directory);
+  const policy = new AccessPolicy(directory, {
+    allowedUsers: config.auth.allowedUsers,
+    adminUsers: config.auth.adminUsers,
+    selfService: config.auth.selfService
+  });
+  const deps = { registry, policy, directory };
 
   let shutdown: () => Promise<void>;
   if (config.transport === 'http') {
@@ -45,7 +55,7 @@ async function main(): Promise<void> {
     shutdown = () => running.close();
   } else {
     const handle = serveStdio(() => buildServer(LOCAL_PRINCIPAL, deps));
-    log.info(`protonmail-pro-mcp ${VERSION} ready on stdio (${config.accounts.length} account(s))`);
+    log.info(`protonmail-pro-mcp ${VERSION} ready on stdio (${directory.list().length} account(s))`);
     shutdown = () => handle.close();
     process.stdin.on('end', () => void stop('stdin closed'));
   }

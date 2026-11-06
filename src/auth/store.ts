@@ -36,6 +36,8 @@ export interface RegisteredClient {
 
 export interface RefreshRecord {
   clientId: string;
+  clientName?: string;
+  issuedAt?: number;
   principal: Principal;
   scope: string;
   resource: string;
@@ -169,6 +171,37 @@ export class AuthStore {
 
   peekRefreshToken(token: string): RefreshRecord | undefined {
     return this.state.refreshTokens[sha256(token)];
+  }
+
+  /** One entry per client the user has connected, newest first. */
+  grantsFor(sub: string): Array<{ clientId: string; clientName?: string; issuedAt?: number; expiresAt: number }> {
+    const now = Date.now() / 1000;
+    const byClient = new Map<string, { clientId: string; clientName?: string; issuedAt?: number; expiresAt: number }>();
+    for (const r of Object.values(this.state.refreshTokens)) {
+      if (r.principal.sub !== sub || r.expiresAt < now) continue;
+      const prev = byClient.get(r.clientId);
+      if (!prev || (r.issuedAt ?? 0) > (prev.issuedAt ?? 0)) {
+        byClient.set(r.clientId, {
+          clientId: r.clientId,
+          clientName: r.clientName ?? this.state.clients[r.clientId]?.client_name,
+          issuedAt: r.issuedAt,
+          expiresAt: r.expiresAt
+        });
+      }
+    }
+    return [...byClient.values()].sort((a, b) => (b.issuedAt ?? 0) - (a.issuedAt ?? 0));
+  }
+
+  revokeGrants(sub: string, clientId: string): number {
+    let n = 0;
+    for (const [k, r] of Object.entries(this.state.refreshTokens)) {
+      if (r.principal.sub === sub && r.clientId === clientId) {
+        delete this.state.refreshTokens[k];
+        n++;
+      }
+    }
+    if (n) this.save();
+    return n;
   }
 
   revokeRefreshToken(token: string): void {

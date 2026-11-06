@@ -40,6 +40,26 @@ describe('AccessPolicy', () => {
   });
 });
 
+describe('roles', () => {
+  const policy = new AccessPolicy(accounts, { allowedUsers: ['*@corp.test'], adminUsers: ['group:admins'], selfService: true });
+
+  it('separates administrators from self-service users', () => {
+    assert.equal(policy.isAdmin(user('dev@corp.test', ['admins'])), true);
+    assert.equal(policy.isAdmin(user('dev@corp.test')), false);
+    assert.equal(policy.canSelfService(user('dev@corp.test')), true);
+    assert.equal(policy.canSelfService(user('x@evil.test')), false);
+    assert.equal(policy.isAdmin(LOCAL_PRINCIPAL), true);
+  });
+
+  it('lets allowed users sign in before they own any mailbox', () => {
+    const empty = new AccessPolicy([], { allowedUsers: ['*@corp.test'], adminUsers: [], selfService: true });
+    assert.equal(empty.mayConnect(user('new@corp.test')), true);
+    assert.equal(empty.mayConnect(user('x@evil.test')), false);
+    const noSelf = new AccessPolicy([], { allowedUsers: ['*@corp.test'], adminUsers: [], selfService: false });
+    assert.equal(noSelf.mayConnect(user('new@corp.test')), false);
+  });
+});
+
 describe('principalFromClaims', () => {
   it('ignores unverified email addresses', () => {
     assert.equal(principalFromClaims({ sub: '1', email: 'me@proton.me', email_verified: false }, 'groups').email, undefined);

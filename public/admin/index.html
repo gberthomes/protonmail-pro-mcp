@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Proton Mail MCP</title>
+<link rel="icon" href="/admin/assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/admin/assets/app.css">
+<script src="/admin/assets/app.js" defer></script>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0V7zM12 17v4"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand"><img src="/admin/assets/icon.svg" alt="" width="28" height="28"><span>Proton Mail MCP</span></div>
+  <div class="user" id="user" hidden>
+    <span class="who" id="who"></span>
+    <button class="btn ghost sm" id="logout" type="button"><svg class="ic"><use href="#i-out"/></svg><span data-i18n="signOut">Sign out</span></button>
+  </div>
+</header>
+
+<main id="app" aria-busy="true">
+  <div class="loading" id="loading"><span class="spinner" aria-hidden="true"></span></div>
+
+  <!-- Sign-in -->
+  <section class="card center" id="login" hidden>
+    <svg class="ic xl accent"><use href="#i-lock"/></svg>
+    <h1 data-i18n="loginTitle">Manage your Proton Mail MCP</h1>
+    <p class="muted" data-i18n="loginText">Sign in with your organization account to add mailboxes and connect your AI assistants.</p>
+    <a class="btn primary lg" id="login-btn" href="/admin/login" data-i18n="signIn">Sign in</a>
+    <p class="muted small" id="login-error" hidden></p>
+  </section>
+
+  <!-- Dashboard -->
+  <div id="dash" hidden>
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2 data-i18n="connectTitle">Connect an AI assistant</h2>
+          <p class="muted" data-i18n="connectText">Use this address in your MCP client. Sign-in happens in the browser the first time.</p>
+        </div>
+      </div>
+      <div class="copy-field">
+        <code id="mcp-url"></code>
+        <button class="btn sm" type="button" data-copy="#mcp-url"><svg class="ic"><use href="#i-copy"/></svg><span data-i18n="copy">Copy</span></button>
+      </div>
+      <div class="tabs" role="tablist" id="client-tabs">
+        <button role="tab" aria-selected="true" data-tab="claude">Claude</button>
+        <button role="tab" aria-selected="false" data-tab="code">Claude Code</button>
+        <button role="tab" aria-selected="false" data-tab="chatgpt">ChatGPT</button>
+        <button role="tab" aria-selected="false" data-tab="json" data-i18n="otherClients">Other clients</button>
+      </div>
+      <div class="tab-panel" id="tab-claude">
+        <ol class="steps">
+          <li data-i18n="claude1">Open <b>Settings → Connectors</b> in Claude (web, desktop or mobile).</li>
+          <li data-i18n="claude2">Choose <b>Add custom connector</b> and paste the address above.</li>
+          <li data-i18n="claude3">Click <b>Connect</b>, approve and sign in.</li>
+        </ol>
+      </div>
+      <div class="tab-panel" id="tab-code" hidden>
+        <div class="copy-field"><code id="snippet-code"></code><button class="btn sm" type="button" data-copy="#snippet-code"><svg class="ic"><use href="#i-copy"/></svg></button></div>
+        <p class="muted small" data-i18n="codeHint">Then run /mcp in Claude Code to sign in.</p>
+      </div>
+      <div class="tab-panel" id="tab-chatgpt" hidden>
+        <ol class="steps">
+          <li data-i18n="gpt1">Open <b>Settings → Apps &amp; Connectors</b> and enable developer mode if needed.</li>
+          <li data-i18n="gpt2">Create a connector with the address above and <b>OAuth</b> authentication.</li>
+        </ol>
+      </div>
+      <div class="tab-panel" id="tab-json" hidden>
+        <div class="copy-field"><pre id="snippet-json"></pre><button class="btn sm" type="button" data-copy="#snippet-json"><svg class="ic"><use href="#i-copy"/></svg></button></div>
+        <p class="muted small" id="sse-hint" hidden></p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <h2 data-i18n="accountsTitle">Mail accounts</h2>
+          <p class="muted" data-i18n="accountsText">Proton accounts reached through Proton Mail Bridge.</p>
+        </div>
+        <button class="btn primary" id="add-account" type="button" hidden><svg class="ic"><use href="#i-plus"/></svg><span data-i18n="addAccount">Add account</span></button>
+      </div>
+      <div class="accounts" id="accounts"></div>
+      <div class="empty" id="accounts-empty" hidden>
+        <svg class="ic xl muted-ic"><use href="#i-mail"/></svg>
+        <p><b data-i18n="emptyTitle">No mailbox yet</b></p>
+        <ol class="steps small">
+          <li data-i18n="empty1">Open Proton Mail Bridge and sign in to your Proton account.</li>
+          <li data-i18n="empty2">Select the account, then <b>Mailbox configuration</b>.</li>
+          <li data-i18n="empty3">Copy the username and the Bridge password, then click <b>Add account</b>.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="card" id="apps-card" hidden>
+      <div class="section-head">
+        <div>
+          <h2 data-i18n="appsTitle">Connected apps</h2>
+          <p class="muted" data-i18n="appsText">AI clients that signed in with your account.</p>
+        </div>
+      </div>
+      <ul class="list" id="apps"></ul>
+      <p class="muted small" id="apps-empty" data-i18n="appsEmpty" hidden>No app connected yet.</p>
+    </section>
+
+    <footer class="foot muted small" id="foot"></footer>
+  </div>
+</main>
+
+<!-- Account editor -->
+<dialog id="editor" aria-labelledby="editor-title">
+  <form method="dialog" id="account-form" novalidate>
+    <header class="dlg-head">
+      <h2 id="editor-title"></h2>
+      <button class="btn icon ghost" value="cancel" type="submit" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
+    </header>
+    <div class="dlg-body">
+      <div class="grid2">
+        <label class="field"><span data-i18n="fEmail">Email address</span>
+          <input name="email" type="email" required autocomplete="off" placeholder="me@proton.me"></label>
+        <label class="field"><span data-i18n="fName">Display name</span>
+          <input name="displayName" type="text" autocomplete="off" data-i18n-placeholder="optional"></label>
+      </div>
+      <div class="grid2">
+        <label class="field"><span data-i18n="fUser">Bridge username</span>
+          <input name="username" type="text" autocomplete="off" data-i18n-placeholder="sameAsEmail"></label>
+        <label class="field"><span data-i18n="fPass">Bridge password</span>
+          <input name="password" type="password" autocomplete="new-password" spellcheck="false"></label>
+      </div>
+      <p class="hint" data-i18n="passHint">Generated by Bridge (account → Mailbox configuration). It is not your Proton password. Stored encrypted.</p>
+      <label class="field"><span data-i18n="fId">Identifier</span>
+        <input name="id" type="text" pattern="[a-z0-9][a-z0-9_\-]{0,39}" autocomplete="off" data-i18n-placeholder="auto">
+        <small class="hint" data-i18n="idHint">Short name the assistant uses to pick this mailbox, e.g. "perso" or "work".</small></label>
+
+      <fieldset class="field" id="users-field">
+        <legend data-i18n="fUsers">Who can use this mailbox</legend>
+        <div class="chips" id="users-chips"></div>
+        <input id="users-input" type="text" autocomplete="off" data-i18n-placeholder="usersPlaceholder">
+        <small class="hint" data-i18n="usersHint">Emails, *@domain.com or group:name. Press Enter to add.</small>
+      </fieldset>
+
+      <details class="advanced" id="advanced" hidden>
+        <summary data-i18n="advanced">Bridge connection</summary>
+        <div class="grid3">
+          <label class="field"><span>IMAP host</span><input name="imapHost" type="text"></label>
+          <label class="field"><span>Port</span><input name="imapPort" type="number" min="1" max="65535"></label>
+          <label class="field"><span data-i18n="security">Security</span><select name="imapSecurity"><option>starttls</option><option>tls</option><option>none</option></select></label>
+        </div>
+        <div class="grid3">
+          <label class="field"><span>SMTP host</span><input name="smtpHost" type="text"></label>
+          <label class="field"><span>Port</span><input name="smtpPort" type="number" min="1" max="65535"></label>
+          <label class="field"><span data-i18n="security">Security</span><select name="smtpSecurity"><option>starttls</option><option>tls</option><option>none</option></select></label>
+        </div>
+        <label class="check"><input name="verifyTls" type="checkbox"><span data-i18n="verifyTls">Verify the TLS certificate (off for Bridge's self-signed certificate)</span></label>
+      </details>
+
+      <div class="test-result" id="test-result" aria-live="polite" hidden></div>
+      <p class="form-error" id="form-error" role="alert" hidden></p>
+    </div>
+    <footer class="dlg-foot">
+      <button class="btn" type="button" id="test-btn"><svg class="ic"><use href="#i-plug"/></svg><span data-i18n="test">Test connection</span></button>
+      <span class="spacer"></span>
+      <button class="btn ghost" value="cancel" type="submit" data-i18n="cancel">Cancel</button>
+      <button class="btn primary" type="button" id="save-btn" data-i18n="save">Save</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="confirm" class="small-dlg">
+  <form method="dialog">
+    <div class="dlg-body"><p id="confirm-text"></p></div>
+    <footer class="dlg-foot"><span class="spacer"></span>
+      <button class="btn ghost" value="no" data-i18n="cancel">Cancel</button>
+      <button class="btn danger" value="yes" id="confirm-yes"></button>
+    </footer>
+  </form>
+</dialog>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+</body>
+</html>

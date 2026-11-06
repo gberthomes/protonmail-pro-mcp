@@ -51,6 +51,16 @@ interface PendingAuthorization {
   nonce?: string;
 }
 
+interface PendingAdminLogin {
+  browser: string;
+  upstreamVerifier: string;
+  nonce: string;
+  returnTo: string;
+}
+
+export const ADMIN_SESSION_COOKIE = 'pmcp_session';
+const ADMIN_SESSION_TTL = 8 * 3600;
+
 interface IssuedCode {
   clientId: string;
   redirectUri: string;
@@ -150,6 +160,7 @@ export class OAuthBridge {
   private readonly store: AuthStore;
   private readonly pending = new TtlMap<PendingAuthorization>();
   private readonly codes = new TtlMap<IssuedCode>();
+  private readonly adminPending = new TtlMap<PendingAdminLogin>();
   private readonly secure: boolean;
 
   constructor(
@@ -244,7 +255,7 @@ export class OAuthBridge {
     return [...scopes].join(' ');
   }
 
-  private async issueTokens(clientId: string, principal: Principal, scope: string, resource: string) {
+  private async issueTokens(clientId: string, principal: Principal, scope: string, resource: string, clientName?: string) {
     const ttl = this.config.auth.accessTokenTtl;
     const accessToken = await new SignJWT({
       client_id: clientId,
@@ -264,6 +275,8 @@ export class OAuthBridge {
       .sign(this.store.signingKey);
     const refreshToken = this.store.issueRefreshToken({
       clientId,
+      clientName,
+      issuedAt: Math.floor(Date.now() / 1000),
       principal,
       scope,
       resource,
@@ -372,6 +385,84 @@ export class OAuthBridge {
     }
     log.error('token endpoint failure', err);
     res.status(500).json({ error: 'server_error', error_description: 'Internal error' });
+  }
+
+  // ------------------------------------------------------------------ web interface sessions
+
+  /** Start an OIDC sign-in for the web interface (shares /oauth/callback with the MCP flow). */
+  async beginAdminLogin(req: Request, res: Response, returnTo = '/admin'): Promise<void> {
+    const browser = this.browserId(req, res);
+    const state = randomToken(24);
+    const pending: PendingAdminLogin = { browser, upstreamVerifier: randomToken(32), nonce: randomToken(16), returnTo: returnTo.startsWith('/admin') ? returnTo : '/admin' };
+    this.adminPending.set(state, pending, 600);
+    res.redirect(
+      302,
+      await this.upstream.authorizationUrl({ redirectUri: this.callbackUrl, state, nonce: pending.nonce, codeChallenge: s256(pending.upstreamVerifier) })
+    );
+  }
+
+  private async finishAdminLogin(_req: Request, res: Response, pending: PendingAdminLogin, browser: string | undefined, q: Record<string, string | undefined>) {
+    if (!browser || !safeEqual(browser, pending.browser)) {
+      res.status(400).send(messagePage('Wrong browser', 'Finish the sign-in in the browser where you started it.'));
+      return;
+    }
+    if (q.error || !q.code) {
+      res.status(400).send(messagePage('Sign-in cancelled', q.error_description ?? q.error ?? 'No authorization code returned.'));
+      return;
+    }
+    let principal: Principal;
+    try {
+      principal = await this.upstream.completeLogin({ code: q.code, redirectUri: this.callbackUrl, codeVerifier: pending.upstreamVerifier, nonce: pending.nonce, iss: q.iss });
+    } catch (err) {
+      log.warn('web interface login failed', err instanceof Error ? err.message : err);
+      res.status(400).send(messagePage('Sign-in failed', 'The identity provider sign-in could not be verified.'));
+      return;
+    }
+    if (!this.policy.mayConnect(principal)) {
+      res.status(403).send(messagePage('Access denied', `${principal.email ?? principal.sub} is not allowed to use this server. Ask the administrator to add you to MCP_ALLOWED_USERS.`));
+      return;
+    }
+    const session = await new SignJWT({ email: principal.email, name: principal.name, groups: principal.groups })
+      .setProtectedHeader({ alg: 'HS256', typ: 'session+jwt' })
+      .setIssuer(this.issuer)
+      .setAudience(`${this.issuer}/admin`)
+      .setSubject(principal.sub)
+      .setIssuedAt()
+      .setExpirationTime(`${ADMIN_SESSION_TTL}s`)
+      .sign(this.store.signingKey);
+    this.cookie(res, ADMIN_SESSION_COOKIE, session, ADMIN_SESSION_TTL);
+    log.info(`Web interface sign-in: ${principal.email ?? principal.sub}`);
+    res.redirect(302, pending.returnTo);
+  }
+
+  async readAdminSession(req: Request): Promise<Principal | undefined> {
+    const raw = parseCookies(req)[ADMIN_SESSION_COOKIE];
+    if (!raw) return undefined;
+    try {
+      const { payload } = await jwtVerify(raw, this.store.signingKey, { issuer: this.issuer, audience: `${this.issuer}/admin`, typ: 'session+jwt', algorithms: ['HS256'] });
+      return {
+        sub: payload.sub!,
+        email: typeof payload.email === 'string' ? payload.email : undefined,
+        name: typeof payload.name === 'string' ? payload.name : undefined,
+        groups: Array.isArray(payload.groups) ? (payload.groups as string[]) : [],
+        via: 'oidc'
+      };
+    } catch {
+      return undefined;
+    }
+  }
+
+  clearAdminSession(res: Response): void {
+    res.clearCookie(ADMIN_SESSION_COOKIE, { path: '/', httpOnly: true, secure: this.secure, sameSite: 'lax' });
+  }
+
+  /** MCP clients holding a refresh token for this user. */
+  connectedApps(sub: string) {
+    return this.store.grantsFor(sub);
+  }
+
+  revokeApp(sub: string, clientId: string): number {
+    return this.store.revokeGrants(sub, clientId);
   }
 
   // ------------------------------------------------------------------ router
@@ -492,8 +583,10 @@ export class OAuthBridge {
     // ---- upstream IdP callback
     r.get('/oauth/callback', rateLimit(60, 60_000), noStore, async (req, res) => {
       const q = req.query as Record<string, string | undefined>;
-      const txn = q.state ? this.pending.take(q.state) : undefined;
       const browser = parseCookies(req)[BROWSER_COOKIE];
+      const admin = q.state ? this.adminPending.take(q.state) : undefined;
+      if (admin) return this.finishAdminLogin(req, res, admin, browser, q);
+      const txn = q.state ? this.pending.take(q.state) : undefined;
       if (!txn || !txn.upstreamVerifier || !txn.nonce) {
         res.status(400).send(messagePage('Request expired', 'This sign-in expired. Start the connection again from your MCP client.'));
         return;
@@ -520,7 +613,7 @@ export class OAuthBridge {
       }
 
       const accounts = this.policy.accountsFor(principal);
-      if (accounts.length === 0) {
+      if (!this.policy.mayConnect(principal)) {
         log.warn(`Denied ${principal.email ?? principal.sub}: no Proton account is granted to this user`);
         return this.redirectWithError(res, txn, 'access_denied', `${principal.email ?? principal.sub} is not allowed to use any mailbox on this server`);
       }
@@ -550,7 +643,7 @@ export class OAuthBridge {
           }
           const resource = body.resource !== undefined ? this.resolveResource(body.resource) : code.resource;
           if (resource !== code.resource) throw new TokenError('invalid_target', 'resource differs from the authorization request');
-          res.json(await this.issueTokens(client.client_id, code.principal, code.scope, resource));
+          res.json(await this.issueTokens(client.client_id, code.principal, code.scope, resource, client.client_name));
           return;
         }
         if (body.grant_type === 'refresh_token') {
@@ -558,9 +651,9 @@ export class OAuthBridge {
           if (!rec || rec.clientId !== client.client_id) throw new TokenError('invalid_grant', 'Invalid refresh token');
           this.store.consumeRefreshToken(body.refresh_token as string);
           if (rec.expiresAt < Date.now() / 1000) throw new TokenError('invalid_grant', 'Refresh token expired');
-          if (this.policy.accountsFor(rec.principal).length === 0) throw new TokenError('invalid_grant', 'Access to this server was revoked');
+          if (!this.policy.mayConnect(rec.principal)) throw new TokenError('invalid_grant', 'Access to this server was revoked');
           const resource = body.resource !== undefined ? this.resolveResource(body.resource) : rec.resource;
-          res.json(await this.issueTokens(client.client_id, rec.principal, rec.scope, resource));
+          res.json(await this.issueTokens(client.client_id, rec.principal, rec.scope, resource, client.client_name ?? rec.clientName));
           return;
         }
         throw new TokenError('unsupported_grant_type', 'Supported grants: authorization_code, refresh_token');

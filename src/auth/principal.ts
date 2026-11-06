@@ -15,7 +15,7 @@ export interface Principal {
 
 export const LOCAL_PRINCIPAL: Principal = { sub: 'local', groups: [], via: 'local', name: 'local user' };
 
-function matches(pattern: string, p: Principal): boolean {
+export function matchesRule(pattern: string, p: Principal): boolean {
   const pat = pattern.trim().toLowerCase();
   if (!pat) return false;
   if (pat === '*') return true;
@@ -28,18 +28,40 @@ function matches(pattern: string, p: Principal): boolean {
   return email === pat;
 }
 
+/** The rule that grants a principal its own accounts: its email, or its subject when it has none. */
+export function ownRule(p: Principal): string {
+  return p.email ?? `sub:${p.sub}`;
+}
+
+export interface AccountSource {
+  list(): AccountConfig[];
+}
+
+export interface PolicyOptions {
+  /** Global allow-list for accounts without their own `users`. Also who may add accounts (self-service). */
+  allowedUsers: string[];
+  /** Who administers every account from the web interface. */
+  adminUsers: string[];
+  /** Let allowed users add their own Proton accounts in the web interface. */
+  selfService: boolean;
+}
+
 export class AccessPolicy {
-  constructor(
-    private readonly accounts: AccountConfig[],
-    private readonly globalAllowList: string[]
-  ) {}
+  private readonly source: AccountSource;
+  private readonly opts: PolicyOptions;
+
+  constructor(accounts: AccountSource | AccountConfig[], options: PolicyOptions | string[]) {
+    this.source = Array.isArray(accounts) ? { list: () => accounts } : accounts;
+    this.opts = Array.isArray(options) ? { allowedUsers: options, adminUsers: options, selfService: true } : options;
+  }
 
   /** Accounts the principal may use, in configuration order. */
   accountsFor(p: Principal): AccountConfig[] {
-    if (p.via === 'local') return this.accounts;
-    return this.accounts.filter(acc => {
-      const rules = acc.users && acc.users.length > 0 ? acc.users : this.globalAllowList;
-      return rules.some(rule => matches(rule, p));
+    const all = this.source.list();
+    if (p.via === 'local') return all;
+    return all.filter(acc => {
+      const rules = acc.users && acc.users.length > 0 ? acc.users : this.opts.allowedUsers;
+      return rules.some(rule => matchesRule(rule, p));
     });
   }
 
@@ -50,8 +72,26 @@ export class AccessPolicy {
     return own ?? allowed[0];
   }
 
+  isAdmin(p: Principal): boolean {
+    return p.via === 'local' || this.opts.adminUsers.some(rule => matchesRule(rule, p));
+  }
+
+  /** May add Proton accounts for themselves in the web interface. */
+  canSelfService(p: Principal): boolean {
+    return this.isAdmin(p) || (this.opts.selfService && this.opts.allowedUsers.some(rule => matchesRule(rule, p)));
+  }
+
+  /** May sign in to the server at all (MCP clients or web interface). */
+  mayConnect(p: Principal): boolean {
+    return this.accountsFor(p).length > 0 || this.canSelfService(p);
+  }
+
   /** True when no access rule at all is configured (every remote caller would be refused). */
   hasNoRules(): boolean {
-    return this.globalAllowList.length === 0 && this.accounts.every(a => !a.users || a.users.length === 0);
+    return (
+      this.opts.allowedUsers.length === 0 &&
+      this.opts.adminUsers.length === 0 &&
+      this.source.list().every(a => !a.users || a.users.length === 0)
+    );
   }
 }

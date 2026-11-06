@@ -6,6 +6,7 @@ An [MCP](https://modelcontextprotocol.io) server for **Proton Mail**: read, sear
 - **Transports**: stdio (local) and HTTP/**HTTPS** (remote).
 - **OIDC sign-in with no client setup**: a built-in OAuth 2.1 authorization server bridges MCP clients to *your* identity provider (Keycloak, Authentik, Authelia, Zitadel, Pocket ID, Google, Microsoft Entra ID, Auth0, Okta…). Clients register themselves (Client ID Metadata Documents or Dynamic Client Registration); users just click *Continue* and sign in.
 - **Multi-account**: as many Proton accounts as Bridge holds, with per-user access rules when served remotely.
+- **Web interface** (`/admin`): sign in with your identity provider, add and test mailboxes, share them, copy the connection address, revoke connected apps. Light (no framework, no build step), responsive, light/dark, English/French.
 
 ## Tools
 
@@ -102,7 +103,7 @@ cp .env.example .env    # set MCP_DOMAIN, OIDC_*, MCP_ALLOWED_USERS, Proton acco
 docker compose run --rm protonmail-bridge init
 ```
 
-In the Bridge prompt: `login`, then `info` to display the IMAP/SMTP username and password to put in `.env`; `exit`.
+In the Bridge prompt: `login`, then `info` to display the IMAP/SMTP username and password; `exit`.
 
 **d. Start**
 
@@ -110,7 +111,9 @@ In the Bridge prompt: `login`, then `info` to display the IMAP/SMTP username and
 docker compose up -d
 ```
 
-**e. Connect a client** to `https://<your-domain>/mcp`:
+**e. Add your mailboxes** at `https://<your-domain>/admin`: sign in, *Add account*, paste the Bridge username and password, *Test connection*, *Save*. (Accounts can also be declared in `.env`.)
+
+**f. Connect a client** to `https://<your-domain>/mcp` (the web interface shows the address and per-client instructions):
 
 - **Claude** (claude.ai / Desktop / mobile): *Settings → Connectors → Add custom connector* → paste the URL.
 - **Claude Code**: `claude mcp add --transport http protonmail https://<your-domain>/mcp`
@@ -120,11 +123,24 @@ The client opens a browser: a consent page names the application, you click *Con
 
 Without Docker: `protonmail-pro-mcp --http` with the same variables, and either `TLS_CERT_FILE`/`TLS_KEY_FILE` for native HTTPS or any TLS reverse proxy (disable response buffering for `/mcp` and `/sse`).
 
+### Web interface
+
+`https://<your-domain>/admin` (or `http://localhost:3000/admin` for a local server without authentication, where you are the administrator).
+
+- **Users** allowed by `MCP_ALLOWED_USERS` sign in with the identity provider (same callback as MCP clients, nothing else to register), add their own Proton accounts, test them, choose who else may use them, and revoke the AI apps connected with their identity. Their accounts always use the server's Bridge.
+- **Administrators** (`MCP_ADMIN_USERS`, defaults to `MCP_ALLOWED_USERS`) manage every account, including the Bridge host/port/TLS settings.
+- Accounts declared in the environment or JSON file are shown read-only.
+- Bridge passwords entered in the interface are stored in `MCP_DATA_DIR/accounts.json`, encrypted with AES-256-GCM (key in `MCP_DATA_DIR/encryption.key` or `MCP_ENCRYPTION_KEY`). A stdio server sharing the same data directory sees them too.
+- New accounts are usable by MCP clients immediately, without restart.
+
+Set `MCP_SELF_SERVICE=false` to reserve account management to administrators, or `MCP_WEB_UI=false` to disable the interface.
+
 ### Who can use which mailbox
 
 | Setting | Effect |
 | --- | --- |
-| `MCP_ALLOWED_USERS` | Global allow-list for accounts that do not define their own `users` |
+| `MCP_ALLOWED_USERS` | Who may sign in, add their own mailboxes, and use accounts that do not define their own `users` |
+| `MCP_ADMIN_USERS` | Who manages every account in the web interface (defaults to `MCP_ALLOWED_USERS`) |
 | account `users` / `PROTONMAIL_ACCOUNT_<X>_USERS` | Allow-list for that account only |
 
 Patterns: `alice@example.com`, `*@example.com`, `group:<name>` (from `OIDC_GROUPS_CLAIM`, nested paths like `realm_access.roles` work), `sub:<subject>`, `*`. A user who matches no account is refused at sign-in. Unverified emails (`email_verified: false`) are ignored. With stdio, the local user sees every account.
@@ -155,6 +171,7 @@ Patterns: `alice@example.com`, `*@example.com`, `group:<name>` (from `OIDC_GROUP
 | `/.well-known/oauth-protected-resource[/mcp]` | RFC 9728 metadata |
 | `/.well-known/oauth-authorization-server` | RFC 8414 metadata (OIDC mode) |
 | `/authorize`, `/token`, `/register`, `/revoke`, `/oauth/callback` | Built-in authorization server |
+| `/admin` | Web interface (`/admin/api/*` is its JSON API) |
 | `/healthz` | Health check |
 
 ## Configuration reference
@@ -181,6 +198,10 @@ Patterns: `alice@example.com`, `*@example.com`, `group:<name>` (from `OIDC_GROUP
 | `OIDC_TOKEN_AUTH_METHOD` | `client_secret_basic` | Or `client_secret_post`, `none` (public client + PKCE) |
 | `OIDC_AUDIENCE` | `PUBLIC_URL/mcp` | Expected audience (`oidc-resource` mode) |
 | `MCP_ALLOWED_USERS` | — | Global access rules (see above) |
+| `MCP_ADMIN_USERS` | `MCP_ALLOWED_USERS` | Web interface administrators |
+| `MCP_SELF_SERVICE` | `true` | Allowed users may add their own accounts |
+| `MCP_WEB_UI` | `true` | Serve the web interface at `/admin` |
+| `MCP_ENCRYPTION_KEY` | random, in `MCP_DATA_DIR` | Key (≥ 32 bytes) encrypting Bridge passwords stored by the web interface |
 | `MCP_API_KEYS` | — | Static bearer keys `key=identity,…` |
 | `MCP_ACCESS_TOKEN_TTL` / `MCP_REFRESH_TOKEN_TTL` | `3600` / `2592000` | Seconds |
 | `MCP_ALLOW_DYNAMIC_REGISTRATION` | `true` | RFC 7591 DCR (deprecated by MCP 2026-07-28, still used by many clients) |
@@ -199,7 +220,8 @@ Every secret variable also accepts a `_FILE` suffix (e.g. `OIDC_CLIENT_SECRET_FI
 - Because the server reaches your IdP with one static client, it asks for consent per MCP client and binds each sign-in to the browser that started it (protection against confused-deputy attacks).
 - Client ID Metadata Documents are fetched over HTTPS only, from public addresses, without redirects, size- and time-bounded.
 - `Host` and `Origin` headers are validated on every request (DNS rebinding); the server refuses to expose mailboxes on a non-loopback address without authentication.
-- Bridge credentials stay on the server; they are never returned by any tool.
+- Bridge credentials stay on the server; they are never returned by any tool or by the web interface (which only accepts new values).
+- The web interface uses an HttpOnly session cookie (8 h), a strict Content-Security-Policy (no inline script), and requires a custom header on every write (CSRF). Non-administrators cannot point an account at another host.
 
 Session state is limited to the OAuth sign-in (a few minutes, in memory); MCP traffic itself is stateless, so behind a load balancer only `/authorize` → `/oauth/callback` needs stickiness, and instances must share `MCP_DATA_DIR` or `MCP_SIGNING_SECRET`.
 
@@ -208,7 +230,7 @@ Session state is limited to the OAuth sign-in (a few minutes, in memory); MCP tr
 ```bash
 npm install
 npm run lint        # type-check
-npm test            # end-to-end: IMAP (STARTTLS) + SMTP test servers, mock OIDC IdP, MCP client on every transport
+npm test            # end-to-end: IMAP (STARTTLS) + SMTP test servers, mock OIDC IdP, MCP client on every transport, web interface API
 npm run dev         # watch mode on stdio; `npm run dev -- --http` for HTTP
 npx @modelcontextprotocol/inspector node dist/index.js
 ```

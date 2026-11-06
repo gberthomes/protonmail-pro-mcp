@@ -9,7 +9,7 @@ import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
@@ -27,6 +27,7 @@ import { loadConfig } from '../src/config.js';
 import { startHttp, type RunningHttpServer } from '../src/http.js';
 import { AccessPolicy } from '../src/auth/principal.js';
 import { AccountRegistry } from '../src/mail/account.js';
+import { AccountDirectory } from '../src/mail/directory.js';
 
 // Works for node:http servers and for test servers that wrap one in `.server`.
 const listen = (srv: Server | { listen: Server['listen']; server: Server }, host = '127.0.0.1') =>
@@ -297,6 +298,11 @@ describe('protonmail-pro-mcp end to end', () => {
       OIDC_CLIENT_ID: 'upstream-client',
       OIDC_CLIENT_SECRET: 'upstream-secret',
       MCP_ALLOWED_USERS: '*@corp.test',
+      MCP_ADMIN_USERS: 'group:admins',
+      // Bridge defaults used for accounts added in the web interface
+      PROTONMAIL_IMAP_PORT: String(imapPortB),
+      PROTONMAIL_SMTP_PORT: String(smtpPort),
+      PROTONMAIL_SMTP_SECURITY: 'none',
       MCP_API_KEYS: `${'k'.repeat(32)}=robot@corp.test`,
       PROTONMAIL_ACCOUNTS: JSON.stringify([
         { id: 'alice', email: 'alice@alice.test', username: 'alice', password: 'alice-bridge-pw', displayName: 'Alice A', imap: { port: imapPortA }, smtp: { port: smtpPort, security: 'none' } },
@@ -326,8 +332,10 @@ describe('protonmail-pro-mcp end to end', () => {
     config.http.publicUrl = new URL(`http://127.0.0.1:${port}`);
     config.http.allowedHosts.push('127.0.0.1');
     base = config.http.publicUrl.origin;
-    registry = new AccountRegistry(config.accounts);
-    app = await startHttp(config, { registry, policy: new AccessPolicy(config.accounts, config.auth.allowedUsers) });
+    const directory = new AccountDirectory(config.accounts, config.dataDir, config.auth.encryptionKey);
+    registry = new AccountRegistry(directory);
+    const policy = new AccessPolicy(directory, { allowedUsers: config.auth.allowedUsers, adminUsers: config.auth.adminUsers, selfService: config.auth.selfService });
+    app = await startHttp(config, { registry, policy, directory });
     const health = await (await fetch(`${base}/healthz`)).json();
     assert.equal((health as { status: string }).status, 'ok');
   });
@@ -486,5 +494,109 @@ describe('protonmail-pro-mcp end to end', () => {
     const bob = json<{ total: number }>(await client.callTool({ name: 'list_emails', arguments: { account: 'bob' } }));
     assert.equal(bob.total, 3);
     await client.close();
+  });
+
+  // ---------------------------------------------------------------- web interface
+
+  it('signs in to the web interface with OIDC and manages accounts (self-service)', async () => {
+    const cookies = new Map<string, string>();
+    const jar = (res: Response) => {
+      for (const c of res.headers.getSetCookie()) {
+        const [pair] = c.split(';');
+        const i = pair!.indexOf('=');
+        cookies.set(pair!.slice(0, i), pair!.slice(i + 1));
+      }
+    };
+    const cookie = () => [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
+    const call = async (path: string, init: { method?: string; body?: unknown; csrf?: boolean } = {}) => {
+      const res = await fetch(`${base}/admin/api${path}`, {
+        method: init.method ?? 'GET',
+        headers: {
+          cookie: cookie(),
+          ...(init.csrf === false ? {} : { 'x-pmcp': '1' }),
+          ...(init.body ? { 'content-type': 'application/json' } : {})
+        },
+        body: init.body ? JSON.stringify(init.body) : undefined
+      });
+      return { status: res.status, data: res.status === 204 ? null : ((await res.json().catch(() => null)) as Record<string, any>) };
+    };
+
+    const page = await fetch(`${base}/admin`);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-security-policy') ?? '', /script-src 'self'/);
+    assert.equal((await call('/me')).status, 401);
+
+    // OIDC sign-in through the same /oauth/callback as MCP clients
+    const start = await fetch(`${base}/admin/login`, { redirect: 'manual' });
+    jar(start);
+    const idp = await fetch(start.headers.get('location')!, { redirect: 'manual' });
+    const back = await fetch(idp.headers.get('location')!, { redirect: 'manual', headers: { cookie: cookie() } });
+    assert.equal(back.status, 302);
+    assert.equal(back.headers.get('location'), '/admin');
+    jar(back);
+
+    const me = await call('/me');
+    assert.equal(me.status, 200);
+    assert.equal(me.data!.user.email, 'alice@corp.test');
+    assert.equal(me.data!.admin, false);
+    assert.equal(me.data!.selfService, true);
+    assert.equal(me.data!.bridge, undefined, 'endpoints are hidden from non-admins');
+
+    const listed = await call('/accounts');
+    assert.deepEqual(listed.data!.accounts.map((a: { id: string }) => a.id), ['alice']);
+    assert.equal(listed.data!.accounts[0].editable, false, 'configuration accounts are read-only');
+
+    // CSRF header is mandatory for writes
+    assert.equal((await call('/accounts', { method: 'POST', body: { email: 'x@y.test', password: 'p' }, csrf: false })).status, 403);
+
+    // Test credentials before saving (non-admin: forced to the Bridge defaults, here bob's test server)
+    const bad = await call('/accounts/test', { method: 'POST', body: { email: 'shared@bob.test', username: 'bob', password: 'wrong' } });
+    assert.equal(bad.data!.imap.ok, false);
+    const good = await call('/accounts/test', { method: 'POST', body: { email: 'shared@bob.test', username: 'bob', password: 'bob-bridge-pw' } });
+    assert.equal(good.data!.imap.ok, true, JSON.stringify(good.data));
+    assert.equal(good.data!.smtp.ok, true, JSON.stringify(good.data));
+
+    // Non-admins cannot point an account at another host
+    const created = await call('/accounts', {
+      method: 'POST',
+      body: { email: 'shared@bob.test', username: 'bob', password: 'bob-bridge-pw', displayName: 'Shared', imap: { host: '10.0.0.1', port: 143, security: 'none' }, users: [] }
+    });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    assert.equal(created.data!.id, 'shared');
+    assert.deepEqual(created.data!.users, ['alice@corp.test'], 'the owner keeps access');
+    assert.ok(!readFileSync(join(dataDir, 'accounts.json'), 'utf8').includes('bob-bridge-pw'), 'password stored encrypted');
+
+    assert.equal((await call('/accounts', { method: 'POST', body: { email: 'alice@alice.test', password: 'x' } })).status, 400, 'duplicate address refused');
+
+    // Immediately usable from MCP, on the Bridge defaults
+    const client = new Client({ name: 'e2e-after-ui', version: '1.0.0' });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { fetch: authedFetch(tokens.access_token) }));
+    const accounts = json(await client.callTool({ name: 'list_accounts', arguments: {} }));
+    assert.deepEqual((accounts.accounts as Array<{ id: string }>).map(a => a.id), ['alice', 'shared']);
+    const inbox = json<{ total: number }>(await client.callTool({ name: 'list_emails', arguments: { account: 'shared' } }));
+    assert.equal(inbox.total, 3);
+
+    // Edit keeps the password, rename the display name
+    const updated = await call('/accounts/shared', { method: 'PUT', body: { email: 'shared@bob.test', username: 'bob', displayName: 'Shared box', users: ['alice@corp.test'] } });
+    assert.equal(updated.status, 200, JSON.stringify(updated.data));
+    assert.equal((await call('/accounts/test', { method: 'POST', body: { savedId: 'shared' } })).data!.imap.ok, true);
+
+    // Connected apps: the OAuth client from the earlier test, revocable
+    const apps = await call('/apps');
+    assert.equal(apps.data!.apps[0].clientName, 'E2E Client');
+    assert.equal((await call(`/apps/${encodeURIComponent(tokens.clientId)}`, { method: 'DELETE' })).status, 204);
+    const refresh = await fetch(tokens.tokenEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: tokens.clientId })
+    });
+    assert.equal(refresh.status, 400, 'revoked refresh token');
+
+    assert.equal((await call('/accounts/shared', { method: 'DELETE' })).status, 204);
+    const after = json(await client.callTool({ name: 'list_accounts', arguments: {} }));
+    assert.deepEqual((after.accounts as Array<{ id: string }>).map(a => a.id), ['alice']);
+    await client.close();
+
+    assert.equal((await call('/logout', { method: 'POST' })).status, 204);
   });
 });

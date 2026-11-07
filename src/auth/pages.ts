@@ -35,7 +35,7 @@ export function consentPage(opts: {
     'Authorize access',
     `<h1>Connect <strong>${esc(opts.clientName)}</strong> to ${esc(opts.serverName)}?</h1>
 ${origin}
-<p>It will be able to read, organize and send email on the Proton accounts you are allowed to use.</p>
+<p>It will be able to read, organize and send email on the mailboxes you are allowed to use.</p>
 <ul><li>Redirects to: <code>${esc(opts.redirectHost)}</code></li><li>Client ID: <code>${esc(opts.clientId)}</code></li></ul>
 <p>You will sign in with your identity provider next. Only continue if you started this connection.</p>
 <form method="post" action="/authorize/consent">

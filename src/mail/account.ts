@@ -16,7 +16,9 @@ import type Mail from 'nodemailer/lib/mailer/index.js';
 
 import type { AccountConfig, Endpoint } from '../config.js';
 import { createLogger } from '../logger.js';
+import { resolvePublic } from '../net.js';
 import type { AccountDirectory } from './directory.js';
+import type { MailOAuth } from './oauth.js';
 
 const log = createLogger('mail');
 
@@ -154,18 +156,55 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+export interface MailAccountDeps {
+  oauth?: MailOAuth;
+  /** Persist a rotated OAuth refresh token. */
+  onRefreshToken?: (token: string) => void;
+}
+
+/** Where to connect: for publicOnly accounts, a verified public IP (no DNS rebinding between check and connect). */
+async function target(ep: Endpoint, publicOnly: boolean | undefined): Promise<{ host: string; servername?: string }> {
+  if (!publicOnly) return { host: ep.host };
+  const [ip] = await resolvePublic(ep.host);
+  return { host: ip!, servername: isIP(ep.host) ? undefined : ep.host };
+}
+
 function tlsOptions(ep: Endpoint) {
   // SNI must not carry an IP address (RFC 6066).
   return { rejectUnauthorized: ep.rejectUnauthorized, ca: ep.ca, servername: isIP(ep.host) ? undefined : ep.host, minVersion: 'TLSv1.2' as const };
 }
 
-export class ProtonAccount {
+export class MailAccount {
   private client?: ImapFlow;
   private connecting?: Promise<ImapFlow>;
   private smtp?: Transporter;
+  private smtpToken?: string;
   private folderCache?: { at: number; folders: ListResponse[] };
 
-  constructor(readonly config: AccountConfig) {}
+  constructor(
+    readonly config: AccountConfig,
+    private readonly deps: MailAccountDeps = {}
+  ) {}
+
+  private get isBridge(): boolean {
+    return !this.config.provider || this.config.provider === 'proton-bridge';
+  }
+
+  private async oauthToken(): Promise<string | undefined> {
+    const o = this.config.oauth;
+    if (!o) return undefined;
+    if (!this.deps.oauth) throw new Error(`Account "${this.id}" uses ${o.provider} sign-in, which is not configured on this server`);
+    return this.deps.oauth.accessToken(o.provider, o.refreshToken, next => {
+      this.config.oauth = { ...o, refreshToken: next };
+      this.deps.onRefreshToken?.(next);
+    });
+  }
+
+  private async auth(ep: Endpoint): Promise<{ user: string; pass?: string; accessToken?: string }> {
+    const user = ep.username ?? this.config.username;
+    const accessToken = await this.oauthToken();
+    return accessToken ? { user, accessToken } : { user, pass: this.config.password };
+  }
 
   get id(): string {
     return this.config.id;
@@ -180,14 +219,29 @@ export class ProtonAccount {
   private async imap(): Promise<ImapFlow> {
     if (this.client?.usable) return this.client;
     if (this.connecting) return this.connecting;
-    const { imap, username, password } = this.config;
+    this.connecting = this.openImap().finally(() => {
+      this.connecting = undefined;
+    });
+    return this.connecting;
+  }
+
+  private async openImap(): Promise<ImapFlow> {
+    const { imap } = this.config;
+    let to: { host: string; servername?: string };
+    let auth: { user: string; pass?: string; accessToken?: string };
+    try {
+      [to, auth] = await Promise.all([target(imap, this.config.publicOnly), this.auth(imap)]);
+    } catch (err) {
+      throw new Error(`Cannot connect to IMAP for account "${this.id}": ${err instanceof Error ? err.message : String(err)}`);
+    }
     const client = new ImapFlow({
-      host: imap.host,
+      host: to.host,
       port: imap.port,
       secure: imap.security === 'tls',
       doSTARTTLS: imap.security === 'starttls' ? true : imap.security === 'none' ? false : undefined,
-      auth: { user: username, pass: password },
-      tls: tlsOptions(imap),
+      auth,
+      servername: to.servername,
+      tls: { ...tlsOptions(imap), ...(to.servername ? { servername: to.servername } : {}) },
       logger: false,
       clientInfo: { name: 'protonmail-pro-mcp' },
       connectionTimeout: 15_000,
@@ -198,24 +252,23 @@ export class ProtonAccount {
     client.on('close', () => {
       if (this.client === client) this.client = undefined;
     });
-    this.connecting = client
-      .connect()
-      .then(() => {
-        this.client = client;
-        log.info(`IMAP connected for ${this.id} (${imap.host}:${imap.port})`);
-        return client;
-      })
-      .catch(err => {
-        // A failed login leaves the socket open: close it explicitly.
-        client.close();
-        throw new Error(
-          `Cannot connect to IMAP for account "${this.id}" at ${imap.host}:${imap.port} — is Proton Mail Bridge running and are the Bridge credentials correct? (${err instanceof Error ? err.message : String(err)})`
-        );
-      })
-      .finally(() => {
-        this.connecting = undefined;
-      });
-    return this.connecting;
+    try {
+      await client.connect();
+    } catch (err) {
+      // A failed login leaves the socket open: close it explicitly.
+      client.close();
+      const hint = this.isBridge
+        ? 'is Proton Mail Bridge running and are the Bridge credentials correct?'
+        : this.config.oauth
+          ? 'reconnect the account in the web interface if access was revoked'
+          : 'check the server settings and the password (many providers require an app password)';
+      throw new Error(
+        `Cannot connect to IMAP for account "${this.id}" at ${imap.host}:${imap.port} — ${hint} (${err instanceof Error ? err.message : String(err)})`
+      );
+    }
+    this.client = client;
+    log.info(`IMAP connected for ${this.id} (${imap.host}:${imap.port})`);
+    return client;
   }
 
   private async withMailbox<T>(folder: string, fn: (client: ImapFlow) => Promise<T>, readOnly = false): Promise<T> {
@@ -471,17 +524,22 @@ export class ProtonAccount {
 
   // ------------------------------------------------------------------ sending
 
-  private transporter(): Transporter {
-    if (this.smtp) return this.smtp;
-    const { smtp, username, password } = this.config;
+  private async transporter(): Promise<Transporter> {
+    const { smtp } = this.config;
+    const auth = await this.auth(smtp);
+    // OAuth access tokens expire: rebuild the transport when the token changes.
+    if (this.smtp && this.smtpToken === auth.accessToken) return this.smtp;
+    this.smtp?.close();
+    const to = await target(smtp, this.config.publicOnly);
+    this.smtpToken = auth.accessToken;
     this.smtp = nodemailer.createTransport({
-      host: smtp.host,
+      host: to.host,
       port: smtp.port,
       secure: smtp.security === 'tls',
       requireTLS: smtp.security === 'starttls',
       ignoreTLS: smtp.security === 'none',
-      auth: { user: username, pass: password },
-      tls: tlsOptions(smtp),
+      auth: auth.accessToken ? { type: 'OAuth2', user: auth.user, accessToken: auth.accessToken } : { user: auth.user, pass: auth.pass },
+      tls: { ...tlsOptions(smtp), ...(to.servername ? { servername: to.servername } : {}) },
       disableFileAccess: true,
       disableUrlAccess: true,
       connectionTimeout: 15_000,
@@ -515,19 +573,37 @@ export class ProtonAccount {
     };
   }
 
-  async send(message: OutgoingMessage): Promise<{ messageId: string; accepted: string[]; rejected: string[] }> {
+  async send(message: OutgoingMessage): Promise<{ messageId: string; accepted: string[]; rejected: string[]; savedToSent?: string }> {
+    // Build the MIME message once: the same bytes are sent and, if needed, filed in Sent.
+    const node = new MailComposer(this.mailOptions(message)).compile();
+    const envelope = node.getEnvelope();
+    const raw = await node.build();
+    const messageId = node.messageId();
+    let info;
     try {
-      const info = await this.transporter().sendMail(this.mailOptions(message));
-      return {
-        messageId: info.messageId,
-        accepted: (info.accepted as Array<string | { address: string }>).map(a => (typeof a === 'string' ? a : a.address)),
-        rejected: (info.rejected as Array<string | { address: string }>).map(a => (typeof a === 'string' ? a : a.address))
-      };
+      info = await (await this.transporter()).sendMail({ envelope, raw, disableFileAccess: true, disableUrlAccess: true });
     } catch (err) {
       throw new Error(
         `SMTP send failed for account "${this.id}" via ${this.config.smtp.host}:${this.config.smtp.port}: ${err instanceof Error ? err.message : String(err)}`
       );
     }
+    let savedToSent: string | undefined;
+    if (this.config.saveSent ?? !this.isBridge) {
+      try {
+        const sent = await this.specialFolder('\\Sent');
+        await (await this.imap()).append(sent, raw, ['\\Seen']);
+        savedToSent = sent;
+      } catch (err) {
+        savedToSent = `failed: ${err instanceof Error ? err.message : String(err)}`;
+        log.warn(`Could not file the sent message for ${this.id}`, savedToSent);
+      }
+    }
+    return {
+      messageId,
+      accepted: (info.accepted as Array<string | { address: string }>).map(a => (typeof a === 'string' ? a : a.address)),
+      rejected: (info.rejected as Array<string | { address: string }>).map(a => (typeof a === 'string' ? a : a.address)),
+      savedToSent
+    };
   }
 
   async saveDraft(message: OutgoingMessage): Promise<{ folder: string; uid?: number }> {
@@ -603,7 +679,7 @@ export class ProtonAccount {
       .then(() => ({ ok: true }))
       .catch(err => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
     const smtp = await this.transporter()
-      .verify()
+      .then(t => t.verify())
       .then(() => ({ ok: true }))
       .catch(err => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
     return { imap, smtp };
@@ -622,14 +698,18 @@ export class ProtonAccount {
  * recreated when an account's settings change.
  */
 export class AccountRegistry {
-  private readonly accounts = new Map<string, { fingerprint: string; account: ProtonAccount }>();
+  private readonly accounts = new Map<string, { fingerprint: string; account: MailAccount }>();
 
-  constructor(private readonly directory: AccountDirectory) {
+  constructor(
+    private readonly directory: AccountDirectory,
+    private readonly oauth?: MailOAuth
+  ) {
     directory.onChange(() => this.sync());
   }
 
   private static fingerprint(c: AccountConfig): string {
-    return JSON.stringify([c.email, c.displayName, c.username, c.password, c.imap, c.smtp]);
+    // The OAuth refresh token is left out: rotation must not drop live connections.
+    return JSON.stringify([c.email, c.displayName, c.username, c.password, c.imap, c.smtp, c.oauth?.provider, c.saveSent, c.publicOnly, c.provider]);
   }
 
   /** Close connections of removed or modified accounts. */
@@ -643,14 +723,17 @@ export class AccountRegistry {
     }
   }
 
-  get(id: string): ProtonAccount | undefined {
+  get(id: string): MailAccount | undefined {
     const cfg = this.directory.get(id);
     if (!cfg) return undefined;
     const fp = AccountRegistry.fingerprint(cfg);
     const existing = this.accounts.get(id);
     if (existing && existing.fingerprint === fp) return existing.account;
     if (existing) void existing.account.close();
-    const account = new ProtonAccount(cfg);
+    const account = new MailAccount(cfg, {
+      oauth: this.oauth,
+      onRefreshToken: token => this.directory.updateRefreshToken(id, token)
+    });
     this.accounts.set(id, { fingerprint: fp, account });
     return account;
   }

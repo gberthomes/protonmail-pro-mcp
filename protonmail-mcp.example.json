@@ -1,7 +1,15 @@
 {
   "bridge": {
-    "imap": { "host": "127.0.0.1", "port": 1143, "security": "starttls" },
-    "smtp": { "host": "127.0.0.1", "port": 1025, "security": "starttls" }
+    "imap": {
+      "host": "127.0.0.1",
+      "port": 1143,
+      "security": "starttls"
+    },
+    "smtp": {
+      "host": "127.0.0.1",
+      "port": 1025,
+      "security": "starttls"
+    }
   },
   "accounts": [
     {
@@ -9,14 +17,56 @@
       "email": "me@proton.me",
       "displayName": "Me",
       "passwordEnv": "PROTON_PERSO_BRIDGE_PASSWORD",
-      "users": ["me@example.com"]
+      "users": [
+        "me@example.com"
+      ]
     },
     {
       "id": "shop",
       "email": "contact@myshop.example",
       "username": "contact@myshop.example",
       "passwordFile": "/run/secrets/proton_shop",
-      "users": ["me@example.com", "group:shop-team"]
+      "users": [
+        "me@example.com",
+        "group:shop-team"
+      ]
+    },
+    {
+      "id": "gmail",
+      "email": "me@gmail.com",
+      "provider": "gmail",
+      "passwordEnv": "GMAIL_APP_PASSWORD",
+      "users": [
+        "me@example.com"
+      ]
+    },
+    {
+      "id": "work",
+      "email": "me@company.example",
+      "discover": true,
+      "passwordFile": "/run/secrets/work_mail",
+      "users": [
+        "me@example.com"
+      ]
+    },
+    {
+      "id": "selfhosted",
+      "email": "me@my-domain.example",
+      "passwordEnv": "SELFHOSTED_PASSWORD",
+      "imap": {
+        "host": "mail.my-domain.example",
+        "port": 993,
+        "security": "tls"
+      },
+      "smtp": {
+        "host": "mail.my-domain.example",
+        "port": 465,
+        "security": "tls"
+      },
+      "saveSent": true,
+      "users": [
+        "me@example.com"
+      ]
     }
   ]
 }

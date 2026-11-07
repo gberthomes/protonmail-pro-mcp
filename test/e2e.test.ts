@@ -28,6 +28,7 @@ import { startHttp, type RunningHttpServer } from '../src/http.js';
 import { AccessPolicy } from '../src/auth/principal.js';
 import { AccountRegistry } from '../src/mail/account.js';
 import { AccountDirectory } from '../src/mail/directory.js';
+import { MailOAuth } from '../src/mail/oauth.js';
 
 // Works for node:http servers and for test servers that wrap one in `.server`.
 const listen = (srv: Server | { listen: Server['listen']; server: Server }, host = '127.0.0.1') =>
@@ -124,6 +125,23 @@ async function mockIdp(user: { sub: string; email: string; groups: string[] }) {
       .setExpirationTime('5m')
       .sign(privateKey);
     res.json({ access_token: 'upstream-at', token_type: 'Bearer', id_token: idToken });
+  });
+  // Mailbox OAuth (stands in for Google): authorize → code → tokens with an ID token
+  app.get('/mail-auth', (req, res) => {
+    const q = req.query as Record<string, string>;
+    assert.equal(q.client_id, 'mail-client');
+    assert.match(q.scope!, /mail\.google\.com/);
+    codes.set('mail-code', { nonce: '', challenge: q.code_challenge!, redirect: q.redirect_uri! });
+    res.redirect(`${q.redirect_uri}?code=mail-code&state=${encodeURIComponent(q.state!)}`);
+  });
+  app.post('/mail-token', async (req, res) => {
+    const entry = codes.get(req.body.code);
+    if (!entry || createHash('sha256').update(String(req.body.code_verifier)).digest('base64url') !== entry.challenge) {
+      res.status(400).json({ error: 'invalid_grant' });
+      return;
+    }
+    const idToken = await new SignJWT({ email: 'boss@gmail.com', name: 'The Boss' }).setProtectedHeader({ alg: 'RS256' }).setSubject('g1').sign(privateKey);
+    res.json({ access_token: 'g-access', refresh_token: 'g-refresh-secret', expires_in: 3600, id_token: idToken });
   });
   const server = createServer(app);
   const port = await listen(server);
@@ -299,6 +317,10 @@ describe('protonmail-pro-mcp end to end', () => {
       OIDC_CLIENT_SECRET: 'upstream-secret',
       MCP_ALLOWED_USERS: '*@corp.test',
       MCP_ADMIN_USERS: 'group:admins',
+      MAIL_OAUTH_GOOGLE_CLIENT_ID: 'mail-client',
+      MAIL_OAUTH_GOOGLE_CLIENT_SECRET: 'mail-secret',
+      MAIL_OAUTH_GOOGLE_AUTHORIZE_URL: `${idp.base}/mail-auth`,
+      MAIL_OAUTH_GOOGLE_TOKEN_URL: `${idp.base}/mail-token`,
       // Bridge defaults used for accounts added in the web interface
       PROTONMAIL_IMAP_PORT: String(imapPortB),
       PROTONMAIL_SMTP_PORT: String(smtpPort),
@@ -333,9 +355,10 @@ describe('protonmail-pro-mcp end to end', () => {
     config.http.allowedHosts.push('127.0.0.1');
     base = config.http.publicUrl.origin;
     const directory = new AccountDirectory(config.accounts, config.dataDir, config.auth.encryptionKey);
-    registry = new AccountRegistry(directory);
+    const oauth = new MailOAuth(config.mailOAuth);
+    registry = new AccountRegistry(directory, oauth);
     const policy = new AccessPolicy(directory, { allowedUsers: config.auth.allowedUsers, adminUsers: config.auth.adminUsers, selfService: config.auth.selfService });
-    app = await startHttp(config, { registry, policy, directory });
+    app = await startHttp(config, { registry, policy, directory, oauth });
     const health = await (await fetch(`${base}/healthz`)).json();
     assert.equal((health as { status: string }).status, 'ok');
   });
@@ -556,10 +579,26 @@ describe('protonmail-pro-mcp end to end', () => {
     assert.equal(good.data!.imap.ok, true, JSON.stringify(good.data));
     assert.equal(good.data!.smtp.ok, true, JSON.stringify(good.data));
 
-    // Non-admins cannot point an account at another host
+    // Non-admins cannot point an account at a private address (SSRF)…
+    const privateHost = await call('/accounts', {
+      method: 'POST',
+      body: {
+        email: 'shared@bob.test', username: 'bob', password: 'bob-bridge-pw', provider: 'custom',
+        imap: { host: '10.0.0.1', port: 993, security: 'tls' }, smtp: { host: '10.0.0.1', port: 465, security: 'tls' }
+      }
+    });
+    assert.equal(privateHost.status, 400);
+    assert.match(privateHost.data!.error, /not a public mail server/);
+    const plaintext = await call('/accounts', {
+      method: 'POST',
+      body: { email: 'shared@bob.test', password: 'x', provider: 'custom', imap: { host: '1.1.1.1', port: 143, security: 'none' }, smtp: { host: '1.1.1.1', port: 25, security: 'none' } }
+    });
+    assert.equal(plaintext.status, 400, 'plaintext refused for non-admins');
+
+    // …but can use the server's Bridge (default when no server is given)
     const created = await call('/accounts', {
       method: 'POST',
-      body: { email: 'shared@bob.test', username: 'bob', password: 'bob-bridge-pw', displayName: 'Shared', imap: { host: '10.0.0.1', port: 143, security: 'none' }, users: [] }
+      body: { email: 'shared@bob.test', username: 'bob', password: 'bob-bridge-pw', displayName: 'Shared', users: [] }
     });
     assert.equal(created.status, 201, JSON.stringify(created.data));
     assert.equal(created.data!.id, 'shared');
@@ -596,6 +635,25 @@ describe('protonmail-pro-mcp end to end', () => {
     const after = json(await client.callTool({ name: 'list_accounts', arguments: {} }));
     assert.deepEqual((after.accounts as Array<{ id: string }>).map(a => a.id), ['alice']);
     await client.close();
+
+    // "Sign in with Google" for a mailbox: discovery offers it, the callback stores an encrypted refresh token
+    const discovered = await call('/discover', { method: 'POST', body: { email: 'boss@gmail.com' } });
+    assert.equal(discovered.data!.provider.id, 'gmail');
+    assert.equal(discovered.data!.oauth, 'google');
+    const oauthStart = await call('/oauth/start', { method: 'POST', body: { provider: 'google', draft: { email: 'boss@gmail.com', id: 'boss' } } });
+    assert.equal(oauthStart.status, 200, JSON.stringify(oauthStart.data));
+    const atGoogle = await fetch(oauthStart.data!.url, { redirect: 'manual' });
+    const callback = await fetch(atGoogle.headers.get('location')!, { redirect: 'manual', headers: { cookie: cookie() } });
+    assert.equal(callback.headers.get('location'), '/admin?connected=boss');
+    const withOAuth = (await call('/accounts')).data!.accounts.find((a: { id: string }) => a.id === 'boss');
+    assert.equal(withOAuth.provider, 'gmail');
+    assert.equal(withOAuth.auth, 'oauth:google');
+    assert.equal(withOAuth.displayName, 'The Boss');
+    assert.equal(withOAuth.imap.host, 'imap.gmail.com');
+    assert.ok(!readFileSync(join(dataDir, 'accounts.json'), 'utf8').includes('g-refresh-secret'), 'refresh token stored encrypted');
+    const replay = await fetch(atGoogle.headers.get('location')!, { redirect: 'manual', headers: { cookie: cookie() } });
+    assert.match(replay.headers.get('location') ?? '', /error=/, 'state is single-use');
+    assert.equal((await call('/accounts/boss', { method: 'DELETE' })).status, 204);
 
     assert.equal((await call('/logout', { method: 'POST' })).status, 204);
   });

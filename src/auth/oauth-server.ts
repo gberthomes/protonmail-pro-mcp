@@ -551,7 +551,7 @@ export class OAuthBridge {
           clientId: client.client_id,
           redirectHost: redirect.protocol.startsWith('http') ? redirect.host : `${redirect.protocol}//${redirect.host}`,
           verifiedDomain: client.metadata_document ? new URL(client.client_id).hostname : undefined,
-          serverName: 'Proton Mail MCP',
+          serverName: 'Mail MCP',
           txn: txnId,
           csrf: txn.csrf
         })

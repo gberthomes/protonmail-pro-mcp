@@ -8,9 +8,7 @@
  * is size- and time-bounded, and results are cached.
  */
 
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
-
+import { resolvePublic } from '../net.js';
 import type { RegisteredClient } from './store.js';
 import { TtlMap } from './store.js';
 
@@ -30,34 +28,6 @@ export function isMetadataDocumentClientId(clientId: string): boolean {
   }
 }
 
-function isPrivateAddress(ip: string): boolean {
-  if (isIP(ip) === 4) {
-    const [a, b] = ip.split('.').map(Number) as [number, number];
-    return (
-      a === 10 ||
-      a === 127 ||
-      a === 0 ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 100 && b >= 64 && b <= 127) ||
-      a >= 224
-    );
-  }
-  const v6 = ip.toLowerCase();
-  if (v6 === '::1' || v6 === '::') return true;
-  if (v6.startsWith('::ffff:')) return isPrivateAddress(v6.slice(7));
-  return v6.startsWith('fc') || v6.startsWith('fd') || v6.startsWith('fe80');
-}
-
-async function assertPublicHost(hostname: string): Promise<void> {
-  const host = hostname.replace(/^\[|\]$/g, '');
-  const addrs = isIP(host) ? [{ address: host }] : await lookup(host, { all: true });
-  if (addrs.length === 0 || addrs.some(a => isPrivateAddress(a.address))) {
-    throw new Error(`client_id host ${hostname} resolves to a non-public address`);
-  }
-}
-
 export async function fetchClientMetadataDocument(clientId: string, allowedHosts: string[] = []): Promise<RegisteredClient> {
   const cached = cache.get(clientId);
   if (cached) return cached;
@@ -66,7 +36,7 @@ export async function fetchClientMetadataDocument(clientId: string, allowedHosts
   if (allowedHosts.length > 0 && !allowedHosts.includes(url.hostname)) {
     throw new Error(`client_id host ${url.hostname} is not allowed`);
   }
-  await assertPublicHost(url.hostname);
+  await resolvePublic(url.hostname);
 
   const res = await fetch(url, {
     redirect: 'error',

@@ -157,7 +157,7 @@ export async function startHttp(config: AppConfig, deps: ServerDeps): Promise<Ru
         authorization_servers: authorizationServers,
         scopes_supported: scopesSupported,
         bearer_methods_supported: ['header'],
-        resource_name: 'Proton Mail MCP',
+        resource_name: 'Mail MCP',
         resource_documentation: 'https://github.com/gberthomes/protonmail-pro-mcp#readme'
       });
     };
@@ -192,7 +192,7 @@ export async function startHttp(config: AppConfig, deps: ServerDeps): Promise<Ru
 
   const localMode = !authEnabled && isLoopbackHost(http.host);
   if (http.webUi) {
-    app.use(adminRouter({ config, directory: deps.directory, policy: deps.policy, bridge, localMode }));
+    app.use(adminRouter({ config, directory: deps.directory, policy: deps.policy, bridge, oauth: deps.oauth, localMode }));
     deps.adminUrl = `${base}/admin`;
     if (!bridge && !localMode) log.info('Web interface disabled: it needs MCP_AUTH=oidc (or a loopback server without authentication).');
   }

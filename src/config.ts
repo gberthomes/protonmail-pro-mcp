@@ -14,6 +14,8 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { createLogger } from './logger.js';
+import { mailOAuthFromEnv, type MailOAuthConfig } from './mail/oauth.js';
+import { providerById, resolveUsername, type MailOAuthProviderId, type ServerPreset } from './mail/providers.js';
 
 const log = createLogger('config');
 
@@ -27,6 +29,8 @@ export interface Endpoint {
   rejectUnauthorized: boolean;
   /** Optional PEM CA/certificate to trust (e.g. the Bridge certificate exported from its settings). */
   ca?: string;
+  /** Login for this server when it differs from the account username (e.g. iCloud IMAP uses the local part). */
+  username?: string;
 }
 
 export interface AccountConfig {
@@ -38,8 +42,18 @@ export interface AccountConfig {
   displayName?: string;
   /** IMAP/SMTP username (Bridge shows it in the mailbox configuration, usually the address). */
   username: string;
-  /** Bridge-generated password (NOT the Proton account password). */
+  /** Bridge-generated password, app password or IMAP password ("" for OAuth accounts). */
   password: string;
+  /** XOAUTH2 instead of a password (accounts connected from the web interface). */
+  oauth?: { provider: MailOAuthProviderId; refreshToken: string };
+  /** Provider preset id ("proton-bridge", "gmail", "custom"…). */
+  provider?: string;
+  /** Append sent messages to the Sent folder (for servers that do not do it themselves). */
+  saveSent?: boolean;
+  /** Only connect to public addresses (accounts added by non-administrators). */
+  publicOnly?: boolean;
+  /** Resolve the IMAP/SMTP servers by autodiscovery at startup. */
+  discover?: boolean;
   imap: Endpoint;
   smtp: Endpoint;
   /**
@@ -101,6 +115,8 @@ export interface AuthConfig {
 
 export interface AppConfig {
   transport: 'stdio' | 'http';
+  /** OAuth clients for Gmail / Microsoft mailboxes. */
+  mailOAuth: MailOAuthConfig;
   accounts: AccountConfig[];
   /** Bridge endpoints used for accounts that do not override them. */
   bridge: { imap: Endpoint; smtp: Endpoint };
@@ -111,6 +127,9 @@ export interface AppConfig {
 
 interface FileAccount {
   id?: string;
+  provider?: string;
+  saveSent?: boolean;
+  discover?: boolean;
   email?: string;
   displayName?: string;
   username?: string;
@@ -183,12 +202,32 @@ function mergeEndpoint(
   override?: Partial<Endpoint> & { caFile?: string }
 ): Endpoint {
   if (!override) return base;
+  const otherHost = override.host !== undefined && override.host !== base.host;
   return {
     host: override.host ?? base.host,
     port: override.port ?? base.port,
     security: override.security ? parseSecurity(override.security, base.security) : base.security,
-    rejectUnauthorized: override.rejectUnauthorized ?? base.rejectUnauthorized,
-    ca: override.caFile ? readFileSync(override.caFile, 'utf8') : (override.ca ?? base.ca)
+    // Only the Bridge has a self-signed certificate: verify any other server unless told otherwise.
+    rejectUnauthorized: override.rejectUnauthorized ?? (otherHost ? true : base.rejectUnauthorized),
+    ca: override.caFile ? readFileSync(override.caFile, 'utf8') : (override.ca ?? (otherHost ? undefined : base.ca)),
+    username: override.username
+  };
+}
+
+/** PROTONMAIL_ACCOUNT_<X>_IMAP_HOST / _PORT / _SECURITY / _USERNAME / _TLS_VERIFY */
+function endpointFromEnv(prefix: string): (Partial<Endpoint> & { caFile?: string }) | undefined {
+  const host = env(`${prefix}HOST`);
+  const port = env(`${prefix}PORT`);
+  const security = env(`${prefix}SECURITY`);
+  const username = env(`${prefix}USERNAME`);
+  const verify = env(`${prefix}TLS_VERIFY`);
+  if (!host && !port && !security && !username && !verify) return undefined;
+  return {
+    host,
+    port: port ? Number.parseInt(port, 10) : undefined,
+    security: security ? parseSecurity(security, 'tls') : undefined,
+    username,
+    rejectUnauthorized: verify ? envBool(`${prefix}TLS_VERIFY`, true) : undefined
   };
 }
 
@@ -242,15 +281,25 @@ function loadAccounts(defaults: { imap: Endpoint; smtp: Endpoint }): AccountConf
     if (!password && raw.passwordEnv) password = env(raw.passwordEnv);
     if (!username || !email) throw new Error(`${origin}: an account needs "email" or "username"`);
     if (!password) throw new Error(`${origin}: account ${email} has no password (use password, passwordFile or passwordEnv)`);
+    // A provider preset fills in the servers (explicit imap/smtp settings still win).
+    const preset = providerById(raw.provider);
+    if (raw.provider && !preset && raw.provider !== 'custom') throw new Error(`${origin}: unknown provider "${raw.provider}"`);
+    const fromPreset = (s?: ServerPreset) =>
+      s ? { host: s.host, port: s.port, security: s.security, username: s.username ? resolveUsername(s.username, email) : undefined } : undefined;
+    const imapOverride = preset && !preset.bridge ? { ...fromPreset(preset.imap), ...raw.imap } : raw.imap;
+    const smtpOverride = preset && !preset.bridge ? { ...fromPreset(preset.smtp), ...raw.smtp } : raw.smtp;
     accounts.push({
       id: raw.id ? slug(raw.id) : slug(email),
       email: email.toLowerCase(),
       displayName: raw.displayName,
-      username,
+      username: raw.username ?? (preset ? resolveUsername(preset.username, email) : username),
       password,
-      imap: mergeEndpoint(base.imap, raw.imap),
-      smtp: mergeEndpoint(base.smtp, raw.smtp),
-      users: raw.users?.map(u => u.trim()).filter(Boolean)
+      imap: mergeEndpoint(base.imap, imapOverride),
+      smtp: mergeEndpoint(base.smtp, smtpOverride),
+      users: raw.users?.map(u => u.trim()).filter(Boolean),
+      provider: preset?.id ?? (raw.imap?.host ? 'custom' : raw.discover ? undefined : 'proton-bridge'),
+      saveSent: raw.saveSent ?? preset?.saveSent,
+      discover: raw.discover && !raw.imap?.host && !preset
     });
   };
 
@@ -289,7 +338,12 @@ function loadAccounts(defaults: { imap: Endpoint; smtp: Endpoint }): AccountConf
         username: env(`${p}USERNAME`),
         password: env(`${p}PASSWORD`),
         displayName: env(`${p}NAME`),
-        users: env(`${p}USERS`) ? list(env(`${p}USERS`)) : undefined
+        users: env(`${p}USERS`) ? list(env(`${p}USERS`)) : undefined,
+        provider: env(`${p}PROVIDER`),
+        discover: env(`${p}DISCOVER`) ? envBool(`${p}DISCOVER`, false) : undefined,
+        saveSent: env(`${p}SAVE_SENT`) ? envBool(`${p}SAVE_SENT`, true) : undefined,
+        imap: endpointFromEnv(`${p}IMAP_`),
+        smtp: endpointFromEnv(`${p}SMTP_`)
       },
       p + '*'
     );
@@ -425,7 +479,7 @@ export function loadConfig(argv: string[] = process.argv.slice(2)): AppConfig {
     env('MCP_DATA_DIR') ?? join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'protonmail-pro-mcp')
   );
 
-  return { transport, accounts, bridge, http, auth, dataDir };
+  return { transport, mailOAuth: mailOAuthFromEnv(env), accounts, bridge, http, auth, dataDir };
 }
 
 export function isLoopbackHost(host: string): boolean {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * protonmail-pro-mcp — Proton Mail MCP server (stdio + Streamable HTTP/HTTPS with OIDC).
+ * protonmail-pro-mcp — mail MCP server for Proton Mail (Bridge) and any IMAP mailbox (stdio + Streamable HTTP/HTTPS with OIDC).
  *
  *   protonmail-pro-mcp            # stdio (Claude Desktop, Claude Code, Cursor, ...)
  *   protonmail-pro-mcp --http     # Streamable HTTP(S) server, see README for OIDC
@@ -14,6 +14,8 @@ import { startHttp } from './http.js';
 import { createLogger } from './logger.js';
 import { AccountRegistry } from './mail/account.js';
 import { AccountDirectory } from './mail/directory.js';
+import { discover, settingsFromDiscovery } from './mail/discovery.js';
+import { MailOAuth } from './mail/oauth.js';
 import { buildServer } from './server.js';
 import { VERSION } from './version.js';
 
@@ -33,6 +35,23 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig(args);
+
+  // Accounts declared with discover=true: resolve their servers now.
+  await Promise.all(
+    config.accounts
+      .filter(a => a.discover)
+      .map(async account => {
+        try {
+          const settings = settingsFromDiscovery(await discover(account.email), config.bridge);
+          if (!settings) throw new Error('no server found');
+          Object.assign(account, settings);
+          if (settings.imap.username || settings.smtp.username) account.username = account.email;
+          log.info(`Account "${account.id}": ${settings.provider} (${settings.imap.host}:${settings.imap.port})`);
+        } catch (err) {
+          log.warn(`Autodiscovery failed for "${account.id}", using the Bridge settings: ${err instanceof Error ? err.message : err}`);
+        }
+      })
+  );
   const directory = new AccountDirectory(config.accounts, config.dataDir, config.auth.encryptionKey);
   if (directory.list().length === 0) {
     log.warn(
@@ -41,13 +60,14 @@ async function main(): Promise<void> {
         : 'No Proton account configured. Set PROTONMAIL_USERNAME and PROTONMAIL_PASSWORD (Bridge credentials), or add accounts with the web interface.'
     );
   }
-  const registry = new AccountRegistry(directory);
+  const oauth = new MailOAuth(config.mailOAuth);
+  const registry = new AccountRegistry(directory, oauth);
   const policy = new AccessPolicy(directory, {
     allowedUsers: config.auth.allowedUsers,
     adminUsers: config.auth.adminUsers,
     selfService: config.auth.selfService
   });
-  const deps = { registry, policy, directory };
+  const deps = { registry, policy, directory, oauth };
 
   let shutdown: () => Promise<void>;
   if (config.transport === 'http') {

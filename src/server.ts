@@ -11,14 +11,16 @@ import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 
 import { AccessPolicy, type Principal } from './auth/principal.js';
-import type { AccountRegistry, ProtonAccount } from './mail/account.js';
+import type { AccountRegistry, MailAccount } from './mail/account.js';
 import type { AccountDirectory } from './mail/directory.js';
+import type { MailOAuth } from './mail/oauth.js';
 import { VERSION } from './version.js';
 
 export interface ServerDeps {
   registry: AccountRegistry;
   policy: AccessPolicy;
   directory: AccountDirectory;
+  oauth?: MailOAuth;
   /** Where users add accounts (HTTP mode with the web interface). */
   adminUrl?: string;
 }
@@ -55,11 +57,11 @@ export function buildServer(principal: Principal, deps: ServerDeps): McpServer {
   const accountList = allowed.map(a => `"${a.id}" (${a.email})`).join(', ') || 'none';
 
   const server = new McpServer(
-    { name: 'protonmail-pro-mcp', title: 'Proton Mail', version: VERSION },
+    { name: 'protonmail-pro-mcp', title: 'Mail (Proton & IMAP)', version: VERSION },
     {
       capabilities: { tools: {} },
       instructions: [
-        'Read, search, organize and send Proton Mail messages through Proton Mail Bridge.',
+        'Read, search, organize and send email over IMAP/SMTP (Proton Mail through Proton Mail Bridge, Gmail, Outlook, iCloud, Fastmail and any IMAP server).',
         `Accounts available to this caller: ${accountList}. Default account: ${defaultAccount ? `"${defaultAccount.id}"` : 'none'}.`,
         'Every tool accepts an optional `account` (id or email address); omit it to use the default account.',
         'Messages are addressed by `folder` + `uid`. Folder aliases: inbox, sent, drafts, trash, spam, archive, all, starred.',
@@ -77,12 +79,12 @@ export function buildServer(principal: Principal, deps: ServerDeps): McpServer {
     .meta({ 'x-mcp-header': 'Account' });
   const folderParam = z.string().optional().describe('Folder path or alias (inbox, sent, drafts, trash, spam, archive, all, starred). Default: inbox');
 
-  const resolve = (account?: string): ProtonAccount => {
+  const resolve = (account?: string): MailAccount => {
     if (allowed.length === 0) {
       throw new Error(
         deps.adminUrl && deps.policy.canSelfService(principal)
-          ? `No Proton account is configured for you yet. Add one at ${deps.adminUrl}`
-          : 'No Proton account is available to you. Ask the administrator to grant access (MCP_ALLOWED_USERS or the account "users" list).'
+          ? `No mailbox is configured for you yet. Add one at ${deps.adminUrl}`
+          : 'No mailbox is available to you. Ask the administrator to grant access (MCP_ALLOWED_USERS or the account "users" list).'
       );
     }
     const wanted = account?.trim().toLowerCase();
@@ -113,7 +115,7 @@ export function buildServer(principal: Principal, deps: ServerDeps): McpServer {
     'list_accounts',
     {
       title: 'List accounts',
-      description: 'List the Proton accounts you can use and which one is the default.',
+      description: 'List the mailboxes you can use and which one is the default.',
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true, openWorldHint: false }
     },
@@ -128,8 +130,8 @@ export function buildServer(principal: Principal, deps: ServerDeps): McpServer {
   tool(
     'check_connection',
     {
-      title: 'Check Bridge connection',
-      description: 'Check that Proton Mail Bridge IMAP and SMTP are reachable for an account.',
+      title: 'Check connection',
+      description: 'Check that the IMAP and SMTP servers of an account are reachable and accept its credentials.',
       inputSchema: z.object({ account: accountParam }),
       annotations: { readOnlyHint: true, openWorldHint: true }
     },
@@ -265,7 +267,7 @@ export function buildServer(principal: Principal, deps: ServerDeps): McpServer {
     'send_email',
     {
       title: 'Send email',
-      description: 'Send a new email from a Proton account. Confirm recipients and content with the user first.',
+      description: 'Send a new email from one of the accounts. Confirm recipients and content with the user first.',
       inputSchema: z.object({
         account: accountParam,
         to: emails.describe('Recipient address(es), comma-separated or array'),
@@ -392,7 +394,7 @@ export function buildServer(principal: Principal, deps: ServerDeps): McpServer {
     'move_emails',
     {
       title: 'Move emails',
-      description: 'Move messages to another folder (e.g. archive, spam, or a custom "Folders/..." path). Applying a label: move/copy to "Labels/<name>".',
+      description: 'Move messages to another folder (e.g. archive, spam, or a path from list_folders). On Proton, custom folders live under "Folders/" and labels under "Labels/".',
       inputSchema: z.object({ account: accountParam, folder: folderParam, uids: uidList, destination: z.string() }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
     },
@@ -420,7 +422,7 @@ export function buildServer(principal: Principal, deps: ServerDeps): McpServer {
     'create_folder',
     {
       title: 'Create folder',
-      description: 'Create a folder ("Folders/Name") or a label ("Labels/Name").',
+      description: 'Create a folder. On Proton use "Folders/Name" for a folder or "Labels/Name" for a label.',
       inputSchema: z.object({ account: accountParam, path: z.string().min(1) }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
     },

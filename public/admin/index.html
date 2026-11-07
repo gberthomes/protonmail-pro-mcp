@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Proton Mail MCP</title>
+<title>Mail MCP</title>
 <link rel="icon" href="/admin/assets/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/admin/assets/app.css">
 <script src="/admin/assets/app.js" defer></script>
@@ -24,7 +24,7 @@
 </svg>
 
 <header class="topbar">
-  <div class="brand"><img src="/admin/assets/icon.svg" alt="" width="28" height="28"><span>Proton Mail MCP</span></div>
+  <div class="brand"><img src="/admin/assets/icon.svg" alt="" width="28" height="28"><span>Mail MCP</span></div>
   <div class="user" id="user" hidden>
     <span class="who" id="who"></span>
     <button class="btn ghost sm" id="logout" type="button"><svg class="ic"><use href="#i-out"/></svg><span data-i18n="signOut">Sign out</span></button>
@@ -37,7 +37,7 @@
   <!-- Sign-in -->
   <section class="card center" id="login" hidden>
     <svg class="ic xl accent"><use href="#i-lock"/></svg>
-    <h1 data-i18n="loginTitle">Manage your Proton Mail MCP</h1>
+    <h1 data-i18n="loginTitle">Manage your Mail MCP</h1>
     <p class="muted" data-i18n="loginText">Sign in with your organization account to add mailboxes and connect your AI assistants.</p>
     <a class="btn primary lg" id="login-btn" href="/admin/login" data-i18n="signIn">Sign in</a>
     <p class="muted small" id="login-error" hidden></p>
@@ -89,7 +89,7 @@
       <div class="section-head">
         <div>
           <h2 data-i18n="accountsTitle">Mail accounts</h2>
-          <p class="muted" data-i18n="accountsText">Proton accounts reached through Proton Mail Bridge.</p>
+          <p class="muted" data-i18n="accountsText">Proton Mail (through Bridge), Gmail, Outlook, iCloud or any IMAP mailbox.</p>
         </div>
         <button class="btn primary" id="add-account" type="button" hidden><svg class="ic"><use href="#i-plus"/></svg><span data-i18n="addAccount">Add account</span></button>
       </div>
@@ -98,9 +98,9 @@
         <svg class="ic xl muted-ic"><use href="#i-mail"/></svg>
         <p><b data-i18n="emptyTitle">No mailbox yet</b></p>
         <ol class="steps small">
-          <li data-i18n="empty1">Open Proton Mail Bridge and sign in to your Proton account.</li>
-          <li data-i18n="empty2">Select the account, then <b>Mailbox configuration</b>.</li>
-          <li data-i18n="empty3">Copy the username and the Bridge password, then click <b>Add account</b>.</li>
+          <li data-i18n="empty1">Click <b>Add account</b> and enter your address: server settings are detected automatically.</li>
+          <li data-i18n="empty2">Gmail and Outlook: sign in with your provider when available, otherwise use an app password.</li>
+          <li data-i18n="empty3">Proton Mail: keep Proton Mail Bridge running and use the password shown in its <b>Mailbox configuration</b>.</li>
         </ol>
       </div>
     </section>
@@ -128,49 +128,86 @@
       <button class="btn icon ghost" value="cancel" type="submit" aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
     </header>
     <div class="dlg-body">
-      <div class="grid2">
-        <label class="field"><span data-i18n="fEmail">Email address</span>
-          <input name="email" type="email" required autocomplete="off" placeholder="me@proton.me"></label>
-        <label class="field"><span data-i18n="fName">Display name</span>
-          <input name="displayName" type="text" autocomplete="off" data-i18n-placeholder="optional"></label>
+      <!-- Step 1: address -->
+      <div class="email-row" id="step-email">
+        <label class="field grow"><span data-i18n="fEmail">Email address</span>
+          <input name="email" type="email" required autocomplete="off" placeholder="me@example.com"></label>
+        <button class="btn primary" type="button" id="discover-btn"><span data-i18n="continue">Continue</span></button>
       </div>
-      <div class="grid2">
-        <label class="field"><span data-i18n="fUser">Bridge username</span>
-          <input name="username" type="text" autocomplete="off" data-i18n-placeholder="sameAsEmail"></label>
-        <label class="field"><span data-i18n="fPass">Bridge password</span>
-          <input name="password" type="password" autocomplete="new-password" spellcheck="false"></label>
+      <p class="hint" id="discover-status" aria-live="polite" hidden></p>
+
+      <!-- Step 2: details -->
+      <div id="step-details" hidden>
+        <div class="provider-card" id="provider-card">
+          <div class="avatar" id="provider-avatar" aria-hidden="true"></div>
+          <div class="grow">
+            <div class="title" id="provider-name"></div>
+            <div class="muted small" id="provider-detail"></div>
+          </div>
+          <button class="btn sm ghost" type="button" id="change-servers" data-i18n="change">Change</button>
+        </div>
+
+        <div class="oauth-box" id="oauth-box" hidden>
+          <button class="btn primary lg" type="button" id="oauth-btn"></button>
+          <p class="hint" id="oauth-note"></p>
+          <button class="link" type="button" id="use-password" data-i18n="usePassword">Use a password instead</button>
+        </div>
+        <p class="note" id="oauth-missing" hidden></p>
+
+        <div id="password-box">
+          <div class="grid2">
+            <label class="field"><span data-i18n="fUser">Username</span>
+              <input name="username" type="text" autocomplete="off" data-i18n-placeholder="sameAsEmail"></label>
+            <label class="field"><span id="password-label" data-i18n="fPass">Password</span>
+              <input name="password" type="password" autocomplete="new-password" spellcheck="false"></label>
+          </div>
+          <p class="hint" id="pass-hint"></p>
+        </div>
+
+        <div class="grid2">
+          <label class="field"><span data-i18n="fName">Display name</span>
+            <input name="displayName" type="text" autocomplete="off" data-i18n-placeholder="optional"></label>
+          <label class="field"><span data-i18n="fId">Identifier</span>
+            <input name="id" type="text" pattern="[a-z0-9][a-z0-9_\-]{0,39}" autocomplete="off" data-i18n-placeholder="auto"></label>
+        </div>
+        <p class="hint" data-i18n="idHint">Short name the assistant uses to pick this mailbox, e.g. "perso" or "work".</p>
+
+        <fieldset class="field" id="users-field">
+          <legend data-i18n="fUsers">Who can use this mailbox</legend>
+          <div class="chips" id="users-chips"></div>
+          <input id="users-input" type="text" autocomplete="off" data-i18n-placeholder="usersPlaceholder">
+          <small class="hint" data-i18n="usersHint">Emails, *@domain.com or group:name. Press Enter to add.</small>
+        </fieldset>
+
+        <details class="advanced" id="advanced">
+          <summary data-i18n="advanced">Server settings</summary>
+          <label class="field"><span data-i18n="fProvider">Provider</span><select name="provider" id="provider-select"></select></label>
+          <p class="hint" id="bridge-note" data-i18n="bridgeNote" hidden>Uses the server's Proton Mail Bridge.</p>
+          <div id="servers">
+            <div class="grid3">
+              <label class="field"><span data-i18n="imapHost">IMAP server</span><input name="imapHost" type="text" autocomplete="off"></label>
+              <label class="field"><span>Port</span><input name="imapPort" type="number" min="1" max="65535"></label>
+              <label class="field"><span data-i18n="security">Security</span><select name="imapSecurity"><option value="tls">SSL/TLS</option><option value="starttls">STARTTLS</option><option value="none" data-i18n="none">None</option></select></label>
+            </div>
+            <div class="grid3">
+              <label class="field"><span data-i18n="smtpHost">SMTP server</span><input name="smtpHost" type="text" autocomplete="off"></label>
+              <label class="field"><span>Port</span><input name="smtpPort" type="number" min="1" max="65535"></label>
+              <label class="field"><span data-i18n="security">Security</span><select name="smtpSecurity"><option value="tls">SSL/TLS</option><option value="starttls">STARTTLS</option><option value="none" data-i18n="none">None</option></select></label>
+            </div>
+            <div class="grid2">
+              <label class="field"><span data-i18n="imapUser">IMAP login (if different)</span><input name="imapUser" type="text" autocomplete="off"></label>
+              <label class="field"><span data-i18n="smtpUser">SMTP login (if different)</span><input name="smtpUser" type="text" autocomplete="off"></label>
+            </div>
+            <label class="check" id="verify-row"><input name="verifyTls" type="checkbox" checked><span data-i18n="verifyTls">Verify TLS certificates</span></label>
+          </div>
+          <label class="check"><input name="saveSent" type="checkbox"><span data-i18n="saveSent">Save a copy of sent messages in "Sent"</span></label>
+        </details>
+
+        <div class="test-result" id="test-result" aria-live="polite" hidden></div>
       </div>
-      <p class="hint" data-i18n="passHint">Generated by Bridge (account → Mailbox configuration). It is not your Proton password. Stored encrypted.</p>
-      <label class="field"><span data-i18n="fId">Identifier</span>
-        <input name="id" type="text" pattern="[a-z0-9][a-z0-9_\-]{0,39}" autocomplete="off" data-i18n-placeholder="auto">
-        <small class="hint" data-i18n="idHint">Short name the assistant uses to pick this mailbox, e.g. "perso" or "work".</small></label>
-
-      <fieldset class="field" id="users-field">
-        <legend data-i18n="fUsers">Who can use this mailbox</legend>
-        <div class="chips" id="users-chips"></div>
-        <input id="users-input" type="text" autocomplete="off" data-i18n-placeholder="usersPlaceholder">
-        <small class="hint" data-i18n="usersHint">Emails, *@domain.com or group:name. Press Enter to add.</small>
-      </fieldset>
-
-      <details class="advanced" id="advanced" hidden>
-        <summary data-i18n="advanced">Bridge connection</summary>
-        <div class="grid3">
-          <label class="field"><span>IMAP host</span><input name="imapHost" type="text"></label>
-          <label class="field"><span>Port</span><input name="imapPort" type="number" min="1" max="65535"></label>
-          <label class="field"><span data-i18n="security">Security</span><select name="imapSecurity"><option>starttls</option><option>tls</option><option>none</option></select></label>
-        </div>
-        <div class="grid3">
-          <label class="field"><span>SMTP host</span><input name="smtpHost" type="text"></label>
-          <label class="field"><span>Port</span><input name="smtpPort" type="number" min="1" max="65535"></label>
-          <label class="field"><span data-i18n="security">Security</span><select name="smtpSecurity"><option>starttls</option><option>tls</option><option>none</option></select></label>
-        </div>
-        <label class="check"><input name="verifyTls" type="checkbox"><span data-i18n="verifyTls">Verify the TLS certificate (off for Bridge's self-signed certificate)</span></label>
-      </details>
-
-      <div class="test-result" id="test-result" aria-live="polite" hidden></div>
       <p class="form-error" id="form-error" role="alert" hidden></p>
     </div>
-    <footer class="dlg-foot">
+    <footer class="dlg-foot" id="editor-foot">
       <button class="btn" type="button" id="test-btn"><svg class="ic"><use href="#i-plug"/></svg><span data-i18n="test">Test connection</span></button>
       <span class="spacer"></span>
       <button class="btn ghost" value="cancel" type="submit" data-i18n="cancel">Cancel</button>

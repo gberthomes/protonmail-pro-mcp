@@ -13,6 +13,7 @@ import { join } from 'node:path';
 
 import type { AccountConfig, Endpoint } from '../config.js';
 import { createLogger } from '../logger.js';
+import type { MailOAuthProviderId } from './providers.js';
 
 const log = createLogger('accounts');
 
@@ -32,7 +33,11 @@ interface StoredAccount {
   email: string;
   displayName?: string;
   username: string;
-  password: string; // encrypted: iv.tag.ciphertext (base64url)
+  password: string; // encrypted: iv.tag.ciphertext (base64url), "" for OAuth accounts
+  oauth?: { provider: MailOAuthProviderId; refreshToken: string }; // refreshToken encrypted
+  provider?: string;
+  saveSent?: boolean;
+  publicOnly?: boolean;
   imap: Endpoint;
   smtp: Endpoint;
   users: string[];
@@ -54,6 +59,11 @@ export interface AccountInput {
   username: string;
   /** Plain password; when omitted on update the stored one is kept. */
   password?: string;
+  /** OAuth instead of a password (plain refresh token). */
+  oauth?: { provider: MailOAuthProviderId; refreshToken: string };
+  provider?: string;
+  saveSent?: boolean;
+  publicOnly?: boolean;
   imap: Endpoint;
   smtp: Endpoint;
   users: string[];
@@ -157,7 +167,11 @@ export class AccountDirectory {
         email: s.email,
         displayName: s.displayName,
         username: s.username,
-        password: this.decrypt(s.password),
+        password: s.password ? this.decrypt(s.password) : '',
+        oauth: s.oauth ? { provider: s.oauth.provider, refreshToken: this.decrypt(s.oauth.refreshToken) } : undefined,
+        provider: s.provider,
+        saveSent: s.saveSent,
+        publicOnly: s.publicOnly,
         imap: s.imap,
         smtp: s.smtp,
         users: s.users,
@@ -198,7 +212,7 @@ export class AccountDirectory {
   }
 
   create(input: AccountInput, owner: { sub: string; email?: string }): AccountEntry {
-    if (!input.password) throw new Error('The Bridge password is required');
+    if (!input.password && !input.oauth) throw new Error('A password is required');
     const now = new Date().toISOString();
     this.reload(true);
     this.managed.push({
@@ -206,7 +220,11 @@ export class AccountDirectory {
       email: input.email,
       displayName: input.displayName,
       username: input.username,
-      password: this.encrypt(input.password),
+      password: input.password ? this.encrypt(input.password) : '',
+      oauth: input.oauth ? { provider: input.oauth.provider, refreshToken: this.encrypt(input.oauth.refreshToken) } : undefined,
+      provider: input.provider,
+      saveSent: input.saveSent,
+      publicOnly: input.publicOnly,
       imap: input.imap,
       smtp: input.smtp,
       users: input.users,
@@ -229,7 +247,16 @@ export class AccountDirectory {
       email: input.email,
       displayName: input.displayName,
       username: input.username,
-      password: input.password ? this.encrypt(input.password) : current.password,
+      // A new password replaces OAuth, a new OAuth grant replaces the password; otherwise keep what is stored.
+      password: input.password ? this.encrypt(input.password) : input.oauth ? '' : current.password,
+      oauth: input.oauth
+        ? { provider: input.oauth.provider, refreshToken: this.encrypt(input.oauth.refreshToken) }
+        : input.password
+          ? undefined
+          : current.oauth,
+      provider: input.provider,
+      saveSent: input.saveSent,
+      publicOnly: input.publicOnly,
       imap: input.imap,
       smtp: input.smtp,
       users: input.users,
@@ -238,6 +265,15 @@ export class AccountDirectory {
     this.persist();
     log.info(`Account "${id}" updated`);
     return this.get(input.id)!;
+  }
+
+  /** Persist a rotated OAuth refresh token without touching anything else. */
+  updateRefreshToken(id: string, refreshToken: string): void {
+    this.reload(true);
+    const current = this.managed.find(a => a.id === id);
+    if (!current?.oauth) return;
+    current.oauth.refreshToken = this.encrypt(refreshToken);
+    this.persist();
   }
 
   remove(id: string): void {

@@ -1,0 +1,62 @@
+# Official Proton Mail Bridge, one unit per instance: protonmail-bridge@<id>.service
+#
+# Runs the unmodified Bridge backend in gRPC mode under the `protonmail-bridge`
+# user. Each instance has its own config, data, cache, keychain (pass + GPG)
+# and a private runtime directory for its control socket (TMPDIR), so several
+# instances can share the host. Give each instance its own IMAP/SMTP ports
+# with `bridge-manager ports set --instance <id> --imap N --smtp N`.
+#
+# Bridge quits when its controlling frontend disappears without detaching:
+# Restart=always brings it back (sessions are kept in its vault).
+
+[Unit]
+Description=Proton Mail Bridge (official) — instance %i
+Documentation=https://proton.me/support/bridge-cli-guide
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=protonmail-bridge
+Group=protonmail-bridge
+Environment=HOME=/var/lib/protonmail-bridge/%i
+Environment=XDG_CONFIG_HOME=/var/lib/protonmail-bridge/%i/config
+Environment=XDG_DATA_HOME=/var/lib/protonmail-bridge/%i/data
+Environment=XDG_CACHE_HOME=/var/lib/protonmail-bridge/%i/cache
+Environment=GNUPGHOME=/var/lib/protonmail-bridge/%i/gnupg
+Environment=PASSWORD_STORE_DIR=/var/lib/protonmail-bridge/%i/password-store
+# Control socket in a private 0700 directory instead of the shared /tmp.
+Environment=TMPDIR=%t/protonmail-bridge/%i
+RuntimeDirectory=protonmail-bridge/%i
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=restart
+# Do not add --noninteractive: it takes precedence over --grpc and disables the control socket.
+ExecStart=/usr/lib/protonmail/bridge/bridge --grpc --parent-pid -1
+Restart=always
+RestartSec=5
+UMask=0077
+
+# Hardening (Bridge needs network, its own state directory and nothing else).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/protonmail-bridge/%i
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

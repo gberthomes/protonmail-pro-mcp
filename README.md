@@ -1,175 +1,295 @@
-# 🌟 The IImagined Collective - Ultimate Proton Mail MCP
+# Mail MCP — Proton Mail and any IMAP mailbox
 
-*The most comprehensive Proton Mail MCP server ever created.*
+An [MCP](https://modelcontextprotocol.io) server to read, search, organize and send mail from Claude, ChatGPT, Cursor, VS Code or any MCP client: **Proton Mail** through the official [Proton Mail Bridge](https://proton.me/mail/bridge), and **any IMAP/SMTP mailbox** (Gmail, Outlook.com / Microsoft 365, iCloud, Yahoo, Fastmail, Orange, Free, OVH, Infomaniak, your own server…).
 
-> "Where distributed intelligence meets first-time perfection. Every email operation is a masterpiece, every message is legendary."
+- **Current protocol**: MCP **2026-07-28** (stateless Streamable HTTP, `server/discover`, `Mcp-Method`/`Mcp-Name`/`Mcp-Param-*` headers) **and** 2025-era clients (`initialize` handshake) on the same endpoint, plus the deprecated HTTP+SSE transport for old clients. Built on the official TypeScript SDK v2.
+- **Transports**: stdio (local) and HTTP/**HTTPS** (remote).
+- **OIDC sign-in with no client setup**: a built-in OAuth 2.1 authorization server bridges MCP clients to *your* identity provider (Keycloak, Authentik, Authelia, Zitadel, Pocket ID, Google, Microsoft Entra ID, Auth0, Okta…). Clients register themselves (Client ID Metadata Documents or Dynamic Client Registration); users just click *Continue* and sign in.
+- **Multi-account**: as many mailboxes as you want, mixing Proton and other providers, with per-user access rules when served remotely.
+- **Autodiscovery**: type an address, the servers are found (built-in presets, the domain's autoconfig, the Mozilla ISPDB, MX records, DNS SRV, Microsoft Autodiscover, then guessing).
+- **Sign in with Google / Microsoft** (XOAUTH2) for Gmail and Outlook mailboxes, or app passwords.
+- **Proton Bridge Manager**: deploy and administer the *official, unmodified* Proton Mail Bridge on Linux — add Proton accounts to an empty Bridge (password, TOTP, mailbox password, human verification) from the web interface or the `bridge-manager` CLI, several accounts per Bridge, several Bridges per host; signed-in accounts become mailboxes automatically, with no Bridge password to copy. See [docs/bridge-manager.md](docs/bridge-manager.md).
+- **Web interface** (`/admin`): sign in with your identity provider, add and test mailboxes, share them, copy the connection address, revoke connected apps. Light (no framework, no build step), responsive, light/dark, English/French.
 
-Built by **The IImagined Collective** for supreme email management and legendary user experiences.
+## Tools
 
-## ✨ Features - Beyond Ordinary Email Management
+| Tool | What it does |
+| --- | --- |
+| `list_accounts` | Accounts available to the caller and the default one |
+| `list_folders` | Folders/labels with message and unread counts |
+| `list_emails` | Newest messages of a folder (pagination, unread only) |
+| `search_emails` | Search by text, from, to, subject, body, dates, flags, size |
+| `get_email` | Full message: headers, text body, attachment list |
+| `get_attachment` | One attachment as an embedded resource |
+| `send_email` | Send (to/cc/bcc, HTML, attachments, priority) |
+| `reply_email` | Reply / reply-all with thread headers and quoting (or save as draft) |
+| `forward_email` | Forward, with attachments (or save as draft) |
+| `create_draft` | Save a message in Drafts without sending |
+| `mark_emails` | Read/unread, starred/unstarred |
+| `move_emails` | Move to a folder or label |
+| `delete_emails` | To Trash, or permanently |
+| `create_folder` / `delete_folder` | Manage `Folders/…` and `Labels/…` |
+| `check_connection` | Bridge IMAP/SMTP health for an account |
 
-### 📧 **Advanced Email Sending (SMTP)**
-- ✅ Rich HTML/Text email composition
-- ✅ Multiple recipients (TO, CC, BCC)
-- ✅ File attachments with base64 encoding
-- ✅ Email templates and scheduling
-- ✅ Priority levels and read receipts
-- ✅ Custom reply-to addresses
-- ✅ SMTP connection verification
+Every tool takes an optional `account` (id or address). Folders accept aliases: `inbox`, `sent`, `drafts`, `trash`, `spam`, `archive`, `all`, `starred`. Tools carry MCP annotations (`readOnlyHint`, `destructiveHint`…) so clients can ask for confirmation on sends and deletions.
 
-### 📬 **Complete Email Reading (IMAP via Proton Bridge)**
-- ✅ Full folder synchronization
-- ✅ Email search with advanced filters
-- ✅ Message threading and conversations
-- ✅ Real-time email parsing
-- ✅ Attachment handling
-- ✅ Read/unread status management
-- ✅ Star/flag email operations
-- ✅ Email moving and organization
+## Prerequisites
 
-### 📊 **Comprehensive Analytics & Statistics**
-- ✅ Email volume trends and patterns
-- ✅ Contact interaction tracking
-- ✅ Response time analysis
-- ✅ Communication insights
-- ✅ Productivity metrics
-- ✅ Storage usage statistics
+1. **Node.js 20+** (or Docker).
+2. For **Proton Mail**: Proton Mail Bridge running and signed in to your account(s) (paid Proton plan). For each account open *Mailbox configuration* and note the **username** and the **Bridge password** — generated by Bridge, it is *not* your Proton password.
+3. For **other providers**: IMAP enabled on the mailbox, and an app password (or *Sign in with Google/Microsoft*, see below).
 
-### 🔧 **System Management & Monitoring**
-- ✅ Connection status monitoring
-- ✅ Cache management
-- ✅ Comprehensive logging
-- ✅ Error tracking and recovery
-- ✅ Performance optimization
+Autodiscovery needs outbound HTTPS and DNS. Behind an HTTP proxy, start Node with `NODE_USE_ENV_PROXY=1` so it honours `HTTPS_PROXY`.
 
-## 🚀 Quick Start
-
-### Prerequisites
-
-1. **ProtonMail Account**: Active ProtonMail account with valid credentials
-2. **Proton Bridge** (for IMAP): Download and install from [ProtonMail Bridge](https://protonmail.com/bridge)
-3. **Node.js**: Version 18.0.0 or higher
-
-### Environment Setup
-
-Create a `.env` file in your project root:
-
-```env
-# Required: ProtonMail SMTP Credentials
-PROTONMAIL_USERNAME=your-protonmail-email@protonmail.com
-PROTONMAIL_PASSWORD=your-protonmail-password
-
-# Optional: SMTP Configuration (defaults provided)
-PROTONMAIL_SMTP_HOST=smtp.protonmail.ch
-PROTONMAIL_SMTP_PORT=587
-
-# Optional: IMAP Configuration (requires Proton Bridge)
-PROTONMAIL_IMAP_HOST=localhost
-PROTONMAIL_IMAP_PORT=1143
-
-# Optional: Debug Mode
-DEBUG=true
-```
-
-### Installation
+## 1. Local use (stdio)
 
 ```bash
-# Clone and build from source
-git clone https://github.com/anyrxo/protonmail-pro-mcp.git
-cd protonmail-pro-mcp
-npm install
-npm run build
+npm install -g github:gberthomes/protonmail-pro-mcp
 ```
 
-### Usage with Claude Desktop
-
-Add to your Claude Desktop MCP configuration:
+Claude Desktop (`claude_desktop_config.json`), Cursor, VS Code and similar clients:
 
 ```json
 {
   "mcpServers": {
-    "IImagined-protonmail": {
-      "command": "node",
-      "args": ["dist/index.js"],
-      "cwd": "/path/to/protonmail-pro-mcp",
+    "protonmail": {
+      "command": "protonmail-pro-mcp",
       "env": {
-        "PROTONMAIL_USERNAME": "your-email@protonmail.com",
-        "PROTONMAIL_PASSWORD": "your-password"
+        "PROTONMAIL_USERNAME": "me@proton.me",
+        "PROTONMAIL_PASSWORD": "bridge-generated-password"
       }
     }
   }
 }
 ```
 
-## 🎯 Available Tools - The Complete Email Arsenal
+Claude Code:
 
-### 📧 Email Sending Operations
-- `send_email` - Advanced email sending with all features
-- `send_test_email` - Quick test email functionality
+```bash
+claude mcp add protonmail -e PROTONMAIL_USERNAME=me@proton.me -e PROTONMAIL_PASSWORD=bridge-password -- protonmail-pro-mcp
+```
 
-### 📬 Email Reading Operations  
-- `get_emails` - Fetch emails with pagination
-- `get_email_by_id` - Get specific email details
-- `search_emails` - Advanced email search with filters
+The defaults match a local Bridge (IMAP `127.0.0.1:1143`, SMTP `127.0.0.1:1025`, STARTTLS with Bridge's self-signed certificate).
 
-### 📁 Folder Management
-- `get_folders` - List all email folders with statistics
-- `sync_folders` - Synchronize folder structure
+## 2. Several accounts, other providers
 
-### ⚡ Email Actions
-- `mark_email_read` - Mark emails as read/unread
-- `star_email` - Star/unstar emails
-- `move_email` - Move emails between folders
-- `delete_email` - Delete emails permanently
+The easiest way is the [web interface](#web-interface): enter the address, the settings are detected, sign in with Google/Microsoft or paste a password, test, save.
 
-### 📊 Analytics & Statistics
-- `get_email_stats` - Comprehensive email statistics
-- `get_email_analytics` - Advanced analytics and insights
-- `get_contacts` - Contact information with interaction stats
-- `get_volume_trends` - Email volume trends over time
+From the configuration, pick whichever form is easiest (the `PROTONMAIL_` prefix is historical; it works for every provider):
 
-### 🔧 System & Maintenance
-- `get_connection_status` - Check SMTP/IMAP connection status
-- `sync_emails` - Manual email synchronization
-- `clear_cache` - Clear email and analytics cache
-- `get_logs` - System logs and debugging information
+```bash
+# Proton accounts (through Bridge) — any index or name after ACCOUNT_
+PROTONMAIL_ACCOUNT_PERSO_EMAIL=me@proton.me
+PROTONMAIL_ACCOUNT_PERSO_PASSWORD=bridge-password-1
 
-## 🌟 The IImagined Difference
+# A known provider: servers come from the preset
+PROTONMAIL_ACCOUNT_GMAIL_EMAIL=me@gmail.com
+PROTONMAIL_ACCOUNT_GMAIL_PROVIDER=gmail
+PROTONMAIL_ACCOUNT_GMAIL_PASSWORD=google-app-password
 
-### Why This MCP is Legendary
+# Any other server: autodiscovery at startup…
+PROTONMAIL_ACCOUNT_WORK_EMAIL=me@company.example
+PROTONMAIL_ACCOUNT_WORK_DISCOVER=true
+PROTONMAIL_ACCOUNT_WORK_PASSWORD=secret
+# …or explicit servers
+# PROTONMAIL_ACCOUNT_WORK_IMAP_HOST=mail.company.example   (also _IMAP_PORT, _IMAP_SECURITY, _IMAP_USERNAME, _IMAP_TLS_VERIFY)
+# PROTONMAIL_ACCOUNT_WORK_SMTP_HOST=mail.company.example   (same for SMTP)
+# PROTONMAIL_ACCOUNT_WORK_SAVE_SENT=true
+```
 
-1. **🏗️ Enterprise Architecture**: Built with Google-scale patterns
-2. **🔍 AI-Powered Intelligence**: Research capabilities for smart automation
-3. **🎨 Beautiful Interfaces**: UX perfection in every interaction
-4. **🤖 Complete Automation**: Self-managing systems
-5. **⚡ First-Time Perfection**: Optimized for immediate success
-6. **✨ Magical Experience**: Seamless human-AI collaboration
+or a JSON file — `./protonmail-mcp.json`, `~/.config/protonmail-pro-mcp/config.json`, or the path in `PROTONMAIL_MCP_CONFIG` (see [`protonmail-mcp.example.json`](protonmail-mcp.example.json)). Per account: `provider` (a preset id), `discover`, `imap`/`smtp` (`host`, `port`, `security`, `username`, `rejectUnauthorized`), `saveSent`, `users`; passwords from `password`, `passwordFile` or `passwordEnv`. `PROTONMAIL_ACCOUNTS` accepts the same array as inline JSON.
 
-### Technical Excellence
+Preset ids: `proton-bridge`, `gmail`, `microsoft`, `icloud`, `yahoo`, `fastmail`, `orange`, `free`, `ovh`, `infomaniak` (anything else: `discover` or explicit servers).
 
-- **🔥 Zero-Bug Deployment**: Comprehensive error handling and validation
-- **📈 Infinite Scalability**: Designed for enterprise-level email volumes  
-- **🛡️ Security First**: Secure credential handling and data protection
-- **⚡ Performance Optimized**: Intelligent caching and connection management
-- **🧠 AI-Ready**: Built for future AI integration and automation
+Good to know:
 
-## 🏆 Production Ready
+- **Passwords**: Gmail, iCloud, Yahoo and Fastmail want an *app password* (or *Sign in with Google* for Gmail). Outlook.com / Microsoft 365 refuse passwords on IMAP: use *Sign in with Microsoft* (see below).
+- **Sent folder**: Bridge, Gmail and Microsoft file sent messages themselves; for other servers the MCP appends a copy to "Sent" (`saveSent`, automatic per provider).
+- **TLS**: certificates are verified for every server except the Bridge (self-signed); plain-text connections are only possible for administrators.
 
-This MCP has been **comprehensively tested and validated**:
-- ✅ **96% Functionality Validated** - All systems working perfectly
-- ✅ **Zero Security Issues** - Complete security audit passed
-- ✅ **20+ MCP Tools** - Complete email management ecosystem
-- ✅ **Enterprise Grade** - Professional architecture and documentation
+The model sees the account list in the server instructions and in each tool's `account` parameter. Without `account`, the caller's own address is used when it matches an account, otherwise the first one.
 
-## 📜 License
+## 3. Remote server over HTTPS with OIDC
 
-MIT License - Built with ❤️ by The IImagined Collective
+The fastest path is Docker Compose: Bridge + this server + Caddy (automatic Let's Encrypt certificate).
 
-## 🌟 Support
+**a. Register one client at your identity provider**
 
-- **GitHub**: [anyrxo/protonmail-pro-mcp](https://github.com/anyrxo/protonmail-pro-mcp)
-- **Issues**: [Report Issues](https://github.com/anyrxo/protonmail-pro-mcp/issues)
+- Type: confidential / *web* application, authorization code flow
+- Redirect URI: `https://<your-domain>/oauth/callback`
+- Scopes: `openid email profile` (add `groups` if you use group rules)
 
----
+**b. Configure**
 
-*"First-time perfection, every time."* - The IImagined Promise 🚀✨
+```bash
+cp .env.example .env    # set MCP_DOMAIN, OIDC_*, MCP_ALLOWED_USERS, Proton accounts
+```
+
+**c. Sign Bridge in (once)**
+
+```bash
+docker compose run --rm protonmail-bridge init
+```
+
+In the Bridge prompt: `login`, then `info` to display the IMAP/SMTP username and password; `exit`.
+
+**d. Start**
+
+```bash
+docker compose up -d
+```
+
+**e. Add your mailboxes** at `https://<your-domain>/admin`: sign in, *Add account*, paste the Bridge username and password, *Test connection*, *Save*. (Accounts can also be declared in `.env`.)
+
+**f. Connect a client** to `https://<your-domain>/mcp` (the web interface shows the address and per-client instructions):
+
+- **Claude** (claude.ai / Desktop / mobile): *Settings → Connectors → Add custom connector* → paste the URL.
+- **Claude Code**: `claude mcp add --transport http protonmail https://<your-domain>/mcp`
+- **VS Code / Cursor / others**: add an HTTP MCP server with that URL.
+
+The client opens a browser: a consent page names the application, you click *Continue*, sign in at your IdP, done. Consent is remembered per browser and client; tokens are refreshed automatically (30-day refresh tokens, rotated on each use).
+
+Without Docker: `protonmail-pro-mcp --http` with the same variables, and either `TLS_CERT_FILE`/`TLS_KEY_FILE` for native HTTPS or any TLS reverse proxy (disable response buffering for `/mcp` and `/sse`).
+
+### Web interface
+
+`https://<your-domain>/admin` (or `http://localhost:3000/admin` for a local server without authentication, where you are the administrator).
+
+- **Users** allowed by `MCP_ALLOWED_USERS` sign in with the identity provider (same callback as MCP clients, nothing else to register), add their own mailboxes (Proton through the server's Bridge, or any public IMAP server over TLS), test them, choose who else may use them, and revoke the AI apps connected with their identity.
+- **Administrators** (`MCP_ADMIN_USERS`, defaults to `MCP_ALLOWED_USERS`) manage every account, and may also use private hosts, plain-text connections or unverified certificates.
+- Accounts declared in the environment or JSON file are shown read-only.
+- Bridge passwords entered in the interface are stored in `MCP_DATA_DIR/accounts.json`, encrypted with AES-256-GCM (key in `MCP_DATA_DIR/encryption.key` or `MCP_ENCRYPTION_KEY`). A stdio server sharing the same data directory sees them too.
+- New accounts are usable by MCP clients immediately, without restart.
+
+Set `MCP_SELF_SERVICE=false` to reserve account management to administrators, or `MCP_WEB_UI=false` to disable the interface.
+
+### Sign in with Google / Microsoft (optional)
+
+Lets users connect Gmail and Outlook mailboxes without any password (XOAUTH2). Register one OAuth application per provider with the redirect URI **`https://<your-domain>/admin/oauth/mail/callback`** (shown in the web interface API at `/admin/api/me`):
+
+- **Google** — Google Cloud console → *APIs & Services* → *Credentials* → *OAuth client ID* (Web application). Scope used: `https://mail.google.com/` (+ `openid email`). This scope is *restricted*: keep the app in *Testing* with your users listed, or use an *Internal* app in Google Workspace; publishing it for everyone requires Google's verification.
+  `MAIL_OAUTH_GOOGLE_CLIENT_ID`, `MAIL_OAUTH_GOOGLE_CLIENT_SECRET`
+- **Microsoft** — Entra admin center → *App registrations* → *New registration* (accounts in any organizational directory and personal Microsoft accounts), *Web* redirect URI as above, a client secret, and the delegated API permissions `IMAP.AccessAsUser.All`, `SMTP.Send`, `offline_access`, `openid`, `email`. For Microsoft 365, SMTP AUTH must be enabled for the mailbox.
+  `MAIL_OAUTH_MICROSOFT_CLIENT_ID`, `MAIL_OAUTH_MICROSOFT_CLIENT_SECRET`, `MAIL_OAUTH_MICROSOFT_TENANT` (default `common`)
+
+Refresh tokens are stored encrypted with the account and rotated automatically.
+
+### Who can use which mailbox
+
+| Setting | Effect |
+| --- | --- |
+| `MCP_ALLOWED_USERS` | Who may sign in, add their own mailboxes, and use accounts that do not define their own `users` |
+| `MCP_ADMIN_USERS` | Who manages every account in the web interface (defaults to `MCP_ALLOWED_USERS`) |
+| account `users` / `PROTONMAIL_ACCOUNT_<X>_USERS` | Allow-list for that account only |
+
+Patterns: `alice@example.com`, `*@example.com`, `group:<name>` (from `OIDC_GROUPS_CLAIM`, nested paths like `realm_access.roles` work), `sub:<subject>`, `*`. A user who matches no account is refused at sign-in. Unverified emails (`email_verified: false`) are ignored. With stdio, the local user sees every account.
+
+### Identity provider notes
+
+| Provider | `OIDC_ISSUER` | Notes |
+| --- | --- | --- |
+| Keycloak | `https://kc.example.com/realms/<realm>` | groups: add a *Group Membership* mapper, or `OIDC_GROUPS_CLAIM=realm_access.roles` |
+| Authentik | `https://auth.example.com/application/o/<slug>/` | |
+| Authelia | `https://auth.example.com` | |
+| Pocket ID / Zitadel | your instance URL | |
+| Google | `https://accounts.google.com` | allow users by email/domain (no groups) |
+| Microsoft Entra ID | `https://login.microsoftonline.com/<tenant-id>/v2.0` | email may be absent: allow by `sub:` or add the optional `email` claim |
+
+### Other authentication modes
+
+- **API keys** for scripts and clients without OAuth: `MCP_API_KEYS="<key>=robot@example.com,<key2>=bob@example.com"` (≥ 24 characters each; the identity on the right is matched against access rules). Send `Authorization: Bearer <key>`. Works alongside OIDC.
+- **Resource-server mode** (`MCP_AUTH=oidc-resource`): for an IdP that can itself register MCP clients (CIMD/DCR) and issue JWT access tokens with this server as audience (`OIDC_AUDIENCE`, default `https://<domain>/mcp`). The protected-resource metadata then points clients directly at your IdP.
+- **No auth**: only on `127.0.0.1` (default bind). Binding elsewhere without auth is refused unless `MCP_ALLOW_UNAUTHENTICATED=true` (for setups where a reverse proxy authenticates).
+
+## Proton Bridge Manager
+
+For Proton accounts on a server, the Manager drives the official Bridge for you instead of you copying Bridge passwords around:
+
+```bash
+sudo deploy/install-debian.sh            # verified official package, service user, keychain, systemd unit
+sudo -u protonmail-bridge BRIDGE_SETTINGS_DIR=/var/lib/protonmail-bridge/default/config/protonmail/bridge-v3 bridge-manager status
+```
+
+Then enable it in the MCP server (`BRIDGE_MANAGER=true` or `BRIDGE_MANAGER_INSTANCES_FILE`, running as the Bridge user) and add accounts with *Add account → Sign in to Proton* in the web interface, or `bridge-manager accounts add`. Everything about it — what was verified in Bridge's source, the compatibility matrix (Bridge **3.27.2** tested), security model, multi-instance modes and limitations — is in [docs/bridge-manager.md](docs/bridge-manager.md). Bridge's gRPC control interface is internal to Proton and not a public API.
+
+## Endpoints
+
+| Path | Purpose |
+| --- | --- |
+| `POST /mcp` | Streamable HTTP — 2026-07-28 per-request, and 2025-era clients statelessly |
+| `GET /sse`, `POST /messages` | Deprecated HTTP+SSE transport (`MCP_LEGACY_SSE=false` to disable) |
+| `/.well-known/oauth-protected-resource[/mcp]` | RFC 9728 metadata |
+| `/.well-known/oauth-authorization-server` | RFC 8414 metadata (OIDC mode) |
+| `/authorize`, `/token`, `/register`, `/revoke`, `/oauth/callback` | Built-in authorization server |
+| `/admin` | Web interface (`/admin/api/*` is its JSON API) |
+| `/healthz` | Health check |
+
+## Configuration reference
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (or pass `--http` / `--stdio`) |
+| `HOST` / `PORT` | `127.0.0.1` / `3000` | Listen address |
+| `PUBLIC_URL` | `http://localhost:PORT` | External origin (e.g. `https://mail-mcp.example.com`), used for OAuth metadata and token audience |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` | — | Serve HTTPS directly |
+| `TRUST_PROXY` | `loopback, linklocal, uniquelocal` | Express trust-proxy setting |
+| `MCP_ALLOWED_HOSTS` / `MCP_ALLOWED_ORIGINS` | — | Extra `Host` / browser `Origin` hostnames to accept (public host and localhost are always allowed) |
+| `PROTONMAIL_USERNAME` / `PROTONMAIL_PASSWORD` | — | Single account (Bridge credentials) |
+| `PROTONMAIL_ACCOUNT_<X>_{EMAIL,USERNAME,PASSWORD,ID,NAME,USERS}` | — | Additional accounts |
+| `PROTONMAIL_ACCOUNT_<X>_{PROVIDER,DISCOVER,SAVE_SENT}` | — | Preset, autodiscovery at startup, copy to Sent |
+| `PROTONMAIL_ACCOUNT_<X>_{IMAP,SMTP}_{HOST,PORT,SECURITY,USERNAME,TLS_VERIFY}` | — | Explicit servers for that account |
+| `MAIL_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET` | — | Enables *Sign in with Google* for Gmail mailboxes |
+| `MAIL_OAUTH_MICROSOFT_CLIENT_ID` / `_SECRET` / `_TENANT` | — / — / `common` | Enables *Sign in with Microsoft* for Outlook mailboxes |
+| `PROTONMAIL_ACCOUNTS` / `PROTONMAIL_MCP_CONFIG` | — | Accounts as inline JSON / JSON file path |
+| `PROTONMAIL_IMAP_HOST` / `_PORT` / `_SECURITY` | `127.0.0.1` / `1143` / `starttls` | Bridge IMAP (`starttls`, `tls`, `none`) |
+| `PROTONMAIL_SMTP_HOST` / `_PORT` / `_SECURITY` | `127.0.0.1` / `1025` / `starttls` | Bridge SMTP |
+| `PROTONMAIL_BRIDGE_CERT` | — | PEM exported from Bridge; enables certificate verification |
+| `PROTONMAIL_TLS_VERIFY` | `false` (`true` with a cert) | Verify the Bridge certificate |
+| `MCP_AUTH` | `oidc` if `OIDC_ISSUER` is set, else `none` | `oidc`, `oidc-resource`, `none` |
+| `OIDC_ISSUER` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | — | Upstream provider |
+| `OIDC_SCOPES` | `openid email profile` | Scopes requested upstream |
+| `OIDC_GROUPS_CLAIM` | `groups` | Claim (dot path allowed) holding groups/roles |
+| `OIDC_TOKEN_AUTH_METHOD` | `client_secret_basic` | Or `client_secret_post`, `none` (public client + PKCE) |
+| `OIDC_AUDIENCE` | `PUBLIC_URL/mcp` | Expected audience (`oidc-resource` mode) |
+| `MCP_ALLOWED_USERS` | — | Global access rules (see above) |
+| `MCP_ADMIN_USERS` | `MCP_ALLOWED_USERS` | Web interface administrators |
+| `MCP_SELF_SERVICE` | `true` | Allowed users may add their own accounts |
+| `MCP_WEB_UI` | `true` | Serve the web interface at `/admin` |
+| `MCP_ENCRYPTION_KEY` | random, in `MCP_DATA_DIR` | Key (≥ 32 bytes) encrypting passwords and OAuth tokens stored by the web interface |
+| `MCP_API_KEYS` | — | Static bearer keys `key=identity,…` |
+| `MCP_ACCESS_TOKEN_TTL` / `MCP_REFRESH_TOKEN_TTL` | `3600` / `2592000` | Seconds |
+| `MCP_ALLOW_DYNAMIC_REGISTRATION` | `true` | RFC 7591 DCR (deprecated by MCP 2026-07-28, still used by many clients) |
+| `MCP_ALLOW_CLIENT_METADATA_DOCUMENTS` | `true` | Client ID Metadata Documents |
+| `MCP_DATA_DIR` | `~/.local/share/protonmail-pro-mcp` | Signing keys, registered clients, refresh tokens |
+| `MCP_SIGNING_SECRET` | random, persisted | Fixed token-signing secret (≥ 32 bytes) when running several instances |
+| `MCP_LEGACY_SSE` | `true` | Serve the deprecated HTTP+SSE transport |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` (always on stderr) |
+
+Every secret variable also accepts a `_FILE` suffix (e.g. `OIDC_CLIENT_SECRET_FILE=/run/secrets/oidc`).
+
+## Security model
+
+- Access tokens are short-lived JWTs bound to this server's MCP endpoint (RFC 8707 audience); refresh tokens are stored hashed and rotated on every use.
+- PKCE S256 is mandatory; authorization codes are single-use and expire after 5 minutes; responses carry `iss` (RFC 9207) and the server checks `iss` from your IdP.
+- Because the server reaches your IdP with one static client, it asks for consent per MCP client and binds each sign-in to the browser that started it (protection against confused-deputy attacks).
+- Client ID Metadata Documents and autodiscovery documents are fetched over HTTPS only, from public addresses, with bounded redirects, size and time.
+- Mail servers added by non-administrators must be public: the address is checked when saving and the connection goes to the verified IP (no DNS rebinding), over TLS with certificate verification.
+- `Host` and `Origin` headers are validated on every request (DNS rebinding); the server refuses to expose mailboxes on a non-loopback address without authentication.
+- Bridge credentials stay on the server; they are never returned by any tool or by the web interface (which only accepts new values).
+- The web interface uses an HttpOnly session cookie (8 h), a strict Content-Security-Policy (no inline script), and requires a custom header on every write (CSRF). Non-administrators cannot point an account at another host.
+
+Session state is limited to the OAuth sign-in (a few minutes, in memory); MCP traffic itself is stateless, so behind a load balancer only `/authorize` → `/oauth/callback` needs stickiness, and instances must share `MCP_DATA_DIR` or `MCP_SIGNING_SECRET`.
+
+## Development
+
+```bash
+npm install
+npm run lint        # type-check
+npm test            # end-to-end: IMAP (STARTTLS) + SMTP test servers, mock OIDC IdP, MCP client on every transport, web interface API
+npm run dev         # watch mode on stdio; `npm run dev -- --http` for HTTP
+npx @modelcontextprotocol/inspector node dist/index.js
+```
+
+## License
+
+MIT

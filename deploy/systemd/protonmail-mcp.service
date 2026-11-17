@@ -1,0 +1,48 @@
+# MCP server + Proton Bridge Manager.
+#
+# Runs as the same user as the Bridge instances: Bridge keeps its control
+# configuration in a 0700 directory, so only that user can drive it.
+# Configuration: /etc/protonmail-mcp/env (see .env.example) and
+# /etc/protonmail-mcp/bridge-instances.json.
+
+[Unit]
+Description=Mail MCP server with Proton Bridge Manager
+After=network-online.target protonmail-bridge@default.service
+Wants=network-online.target protonmail-bridge@default.service
+
+[Service]
+Type=simple
+User=protonmail-bridge
+Group=protonmail-bridge
+EnvironmentFile=/etc/protonmail-mcp/env
+Environment=NODE_ENV=production
+Environment=MCP_TRANSPORT=http
+Environment=MCP_DATA_DIR=/var/lib/protonmail-mcp
+Environment=BRIDGE_MANAGER_INSTANCES_FILE=/etc/protonmail-mcp/bridge-instances.json
+ExecStart=/usr/bin/node /opt/protonmail-mcp/dist/index.js --http
+# Detach from Bridge cleanly on stop (otherwise Bridge quits and restarts).
+KillSignal=SIGTERM
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=5
+StateDirectory=protonmail-mcp
+StateDirectoryMode=0700
+UMask=0077
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/var/lib/protonmail-bridge
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

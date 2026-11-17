@@ -154,6 +154,23 @@
         </div>
         <p class="note" id="oauth-missing" hidden></p>
 
+        <!-- Proton through the Bridge Manager: sign in to Proton, no Bridge password to copy -->
+        <div class="proton-box" id="proton-box" hidden>
+          <p class="hint" data-i18n="protonIntro">Sign in with your Proton account: Bridge on this server keeps the session, nothing else to copy.</p>
+          <div id="proton-start">
+            <label class="field"><span data-i18n="protonPassword">Proton password</span>
+              <input id="proton-password" type="password" autocomplete="current-password" spellcheck="false"></label>
+          </div>
+          <div id="proton-step" hidden>
+            <p class="note" id="proton-step-text"></p>
+            <a class="link" id="proton-hv-link" href="#" target="_blank" rel="noopener noreferrer" hidden data-i18n="protonHvOpen">Open the verification page</a>
+            <label class="field"><span id="proton-step-label"></span>
+              <input id="proton-step-input" autocomplete="off" spellcheck="false"></label>
+          </div>
+          <button class="btn primary lg" type="button" id="proton-btn"></button>
+          <button class="link" type="button" id="proton-manual" data-i18n="protonManual">I already have a Bridge password</button>
+        </div>
+
         <div id="password-box">
           <div class="grid2">
             <label class="field"><span data-i18n="fUser">Username</span>
@@ -164,22 +181,22 @@
           <p class="hint" id="pass-hint"></p>
         </div>
 
-        <div class="grid2">
+        <div class="grid2 generic-only">
           <label class="field"><span data-i18n="fName">Display name</span>
             <input name="displayName" type="text" autocomplete="off" data-i18n-placeholder="optional"></label>
           <label class="field"><span data-i18n="fId">Identifier</span>
             <input name="id" type="text" pattern="[a-z0-9][a-z0-9_\-]{0,39}" autocomplete="off" data-i18n-placeholder="auto"></label>
         </div>
-        <p class="hint" data-i18n="idHint">Short name the assistant uses to pick this mailbox, e.g. "perso" or "work".</p>
+        <p class="hint generic-only" data-i18n="idHint">Short name the assistant uses to pick this mailbox, e.g. "perso" or "work".</p>
 
-        <fieldset class="field" id="users-field">
+        <fieldset class="field generic-only" id="users-field">
           <legend data-i18n="fUsers">Who can use this mailbox</legend>
           <div class="chips" id="users-chips"></div>
           <input id="users-input" type="text" autocomplete="off" data-i18n-placeholder="usersPlaceholder">
           <small class="hint" data-i18n="usersHint">Emails, *@domain.com or group:name. Press Enter to add.</small>
         </fieldset>
 
-        <details class="advanced" id="advanced">
+        <details class="advanced generic-only" id="advanced">
           <summary data-i18n="advanced">Server settings</summary>
           <label class="field"><span data-i18n="fProvider">Provider</span><select name="provider" id="provider-select"></select></label>
           <p class="hint" id="bridge-note" data-i18n="bridgeNote" hidden>Uses the server's Proton Mail Bridge.</p>
@@ -218,7 +235,8 @@
 
 <dialog id="confirm" class="small-dlg">
   <form method="dialog">
-    <div class="dlg-body"><p id="confirm-text"></p></div>
+    <div class="dlg-body"><p id="confirm-text"></p>
+      <label class="field" id="confirm-field" hidden><span id="confirm-label"></span><input id="confirm-input" type="text" autocomplete="off"></label></div>
     <footer class="dlg-foot"><span class="spacer"></span>
       <button class="btn ghost" value="no" data-i18n="cancel">Cancel</button>
       <button class="btn danger" value="yes" id="confirm-yes"></button>

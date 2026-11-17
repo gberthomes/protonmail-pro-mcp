@@ -240,3 +240,6 @@ input:invalid:not(:placeholder-shown) { border-color: var(--bad); }
 .hint a { color: var(--accent); }
 #servers { display: grid; gap: 10px; }
 .advanced > .field { margin-bottom: 4px; }
+.proton-box { display: grid; gap: 10px; }
+.proton-box .btn.lg { width: 100%; }
+.proton-box .link { justify-self: start; }

@@ -25,7 +25,10 @@ import { discover } from '../mail/discovery.js';
 import { MAIL_OAUTH_LABELS, type MailOAuth } from '../mail/oauth.js';
 import { providerById, PROVIDERS, type MailOAuthProviderId } from '../mail/providers.js';
 import { resolvePublic } from '../net.js';
+import type { BridgeAccountSource } from '../bridge-manager/accounts-source.js';
+import type { BridgeManager } from '../bridge-manager/manager.js';
 import { VERSION } from '../version.js';
+import { bridgeRoutes } from './bridge-routes.js';
 
 const log = createLogger('admin');
 
@@ -35,6 +38,9 @@ export interface AdminDeps {
   policy: AccessPolicy;
   bridge?: OAuthBridge;
   oauth?: MailOAuth;
+  /** Proton Bridge Manager (optional). */
+  bridgeManager?: BridgeManager;
+  bridgeSource?: BridgeAccountSource;
   /** Serve without sign-in (server bound to loopback without authentication). */
   localMode: boolean;
 }
@@ -250,7 +256,8 @@ export function adminRouter(deps: AdminDeps): Router {
       imap: admin || (editable && !preset?.bridge) ? endpointView(a.imap) : undefined,
       smtp: admin || (editable && !preset?.bridge) ? endpointView(a.smtp) : undefined,
       editable,
-      usable: policy.accountsFor(p).some(x => x.id === a.id)
+      usable: policy.accountsFor(p).some(x => x.id === a.id),
+      bridge: a.bridge ? { instance: a.bridge.instance, userId: a.bridge.userId, manageable: admin || mine } : undefined
     };
   };
 
@@ -404,7 +411,8 @@ export function adminRouter(deps: AdminDeps): Router {
       mailOAuth: oauth?.available() ?? [],
       oauthRedirectUri: oauthCallback,
       ownRule: ownRule(p),
-      appsSupported: Boolean(bridge)
+      appsSupported: Boolean(bridge),
+      bridgeManager: deps.bridgeManager ? deps.bridgeManager.instances().map(i => i.id) : undefined
     });
   });
 
@@ -532,6 +540,10 @@ export function adminRouter(deps: AdminDeps): Router {
     bridge?.clearAdminSession(res);
     res.status(204).end();
   });
+
+  if (deps.bridgeManager && deps.bridgeSource) {
+    api.use('/bridge', bridgeRoutes({ manager: deps.bridgeManager, source: deps.bridgeSource, policy, principal: me }));
+  }
 
   r.use('/admin/api', express.json({ limit: '64kb' }), api);
   return r;

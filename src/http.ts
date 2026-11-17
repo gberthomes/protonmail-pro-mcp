@@ -192,7 +192,7 @@ export async function startHttp(config: AppConfig, deps: ServerDeps): Promise<Ru
 
   const localMode = !authEnabled && isLoopbackHost(http.host);
   if (http.webUi) {
-    app.use(adminRouter({ config, directory: deps.directory, policy: deps.policy, bridge, oauth: deps.oauth, localMode }));
+    app.use(adminRouter({ config, directory: deps.directory, policy: deps.policy, bridge, oauth: deps.oauth, bridgeManager: deps.bridgeManager, bridgeSource: deps.bridgeSource, localMode }));
     deps.adminUrl = `${base}/admin`;
     if (!bridge && !localMode) log.info('Web interface disabled: it needs MCP_AUTH=oidc (or a loopback server without authentication).');
   }

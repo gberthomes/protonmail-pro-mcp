@@ -14,6 +14,8 @@ import { AccessPolicy, type Principal } from './auth/principal.js';
 import type { AccountRegistry, MailAccount } from './mail/account.js';
 import type { AccountDirectory } from './mail/directory.js';
 import type { MailOAuth } from './mail/oauth.js';
+import type { BridgeAccountSource } from './bridge-manager/accounts-source.js';
+import type { BridgeManager } from './bridge-manager/manager.js';
 import { VERSION } from './version.js';
 
 export interface ServerDeps {
@@ -21,6 +23,8 @@ export interface ServerDeps {
   policy: AccessPolicy;
   directory: AccountDirectory;
   oauth?: MailOAuth;
+  bridgeManager?: BridgeManager;
+  bridgeSource?: BridgeAccountSource;
   /** Where users add accounts (HTTP mode with the web interface). */
   adminUrl?: string;
 }

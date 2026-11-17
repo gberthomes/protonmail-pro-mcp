@@ -7,7 +7,10 @@
 # Clients connect to https://$MCP_DOMAIN/mcp
 services:
   protonmail-bridge:
-    # Community image running the official Proton Mail Bridge headless.
+    # Community image running Proton Mail Bridge headless (plain IMAP/SMTP setup).
+    # It is not built or verified by Proton: review it, or use the systemd deployment
+    # with the signed official package (deploy/install-debian.sh), which the Proton
+    # Bridge Manager supports.
     image: shenxn/protonmail-bridge:latest
     restart: unless-stopped
     volumes:

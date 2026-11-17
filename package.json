@@ -5,10 +5,11 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "protonmail-pro-mcp": "dist/index.js"
+    "protonmail-pro-mcp": "dist/index.js",
+    "bridge-manager": "dist/bridge-manager/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('src/bridge-manager/proto','dist/bridge-manager/proto',{recursive:true})\"",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "start:http": "node dist/index.js --http",
@@ -43,6 +44,8 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@grpc/grpc-js": "1.14.7",
+    "@grpc/proto-loader": "0.8.1",
     "@modelcontextprotocol/express": "^2.0.2",
     "@modelcontextprotocol/node": "^2.1.2",
     "@modelcontextprotocol/server": "^2.4.0",
@@ -70,6 +73,8 @@
   "files": [
     "dist/**/*",
     "public/**/*",
+    "deploy/**/*",
+    "docs/**/*",
     "README.md",
     "protonmail-mcp.example.json"
   ]

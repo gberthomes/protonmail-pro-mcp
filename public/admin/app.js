@@ -59,6 +59,23 @@ const I18N = {
     fromConfig: 'configuration', shared: 'shared with you', yours: 'yours', connected: 'connected', failed: 'error',
     youAdmin: 'administrator', local: 'local mode', revoked: 'App disconnected',
     errGeneric: 'Something went wrong', errEmail: 'Enter a valid email address',
+    protonIntro: 'Sign in with your Proton account: Bridge on this server keeps the session, nothing else to copy.',
+    protonSigning: 'Signing in…', protonPassword: 'Proton password', protonSignIn: 'Sign in to Proton', protonContinue: 'Continue', protonManual: 'I already have a Bridge password',
+    protonTotp: 'Enter the 6-digit code from your authenticator app.', protonTotpLabel: 'Two-factor code',
+    protonTotpFido: 'Enter the 6-digit code from your authenticator app (security keys are not supported here).',
+    protonMailbox: 'This account uses a second password to decrypt the mailbox.', protonMailboxLabel: 'Mailbox password',
+    protonHv: 'Proton wants to check you are human. Open the verification page, complete it, then enter your Proton password again.', protonHvOpen: 'Open the verification page',
+    protonAdded: '{email} is connected to Bridge', protonAlready: '{email} was already connected to Bridge',
+    bridgeBadge: 'Bridge', signOut2: 'Sign out', signedOut: 'Signed out of Bridge',
+    removeBridge: 'Remove {email} from Bridge? Its local data on this server is deleted and assistants lose access. Type the address to confirm.', removeLabel: 'Address',
+    perr_username_password_error: 'Incorrect Proton username or password.', perr_free_user: 'Proton Mail Bridge requires a paid Proton plan.',
+    perr_connection_error: 'Bridge could not reach Proton. Try again.', perr_tfa_error: 'Incorrect two-factor code.',
+    perr_tfa_abort: 'Two-factor authentication was interrupted. Start again.', perr_two_passwords_error: 'Incorrect mailbox password.',
+    perr_two_passwords_abort: 'The mailbox password step was interrupted. Start again.', perr_hv_error: 'Human verification failed or expired. Start again.',
+    'perr_too-many-attempts': 'Too many incorrect attempts. Start again.', perr_timeout: 'Bridge did not answer in time.', perr_expired: 'This sign-in expired. Start again.',
+    'perr_fido-unsupported': 'This account requires a security key, which cannot be used here. Add an authenticator app to the account.',
+    perr_busy: 'Another sign-in is in progress on this Bridge. Try again in a few minutes.', 'perr_stream-busy': 'Another application controls this Bridge (Proton Bridge window?).',
+    perr_rate_limited: 'Too many attempts, try again later.', 'perr_rate-limited': 'Too many attempts, try again later.',
     forbidden: 'You are not allowed to use this server.'
   },
   fr: {
@@ -118,6 +135,23 @@ const I18N = {
     fromConfig: 'configuration', shared: 'partagé avec vous', yours: 'à vous', connected: 'connecté', failed: 'erreur',
     youAdmin: 'administrateur', local: 'mode local', revoked: 'Application déconnectée',
     errGeneric: 'Une erreur est survenue', errEmail: 'Saisissez une adresse e-mail valide',
+    protonIntro: 'Connectez-vous avec votre compte Proton : le Bridge de ce serveur garde la session, rien d’autre à copier.',
+    protonSigning: 'Connexion…', protonPassword: 'Mot de passe Proton', protonSignIn: 'Se connecter à Proton', protonContinue: 'Continuer', protonManual: 'J’ai déjà un mot de passe Bridge',
+    protonTotp: 'Saisissez le code à 6 chiffres de votre application d’authentification.', protonTotpLabel: 'Code de double authentification',
+    protonTotpFido: 'Saisissez le code à 6 chiffres de votre application d’authentification (les clés de sécurité ne sont pas prises en charge ici).',
+    protonMailbox: 'Ce compte utilise un second mot de passe pour déchiffrer la boîte.', protonMailboxLabel: 'Mot de passe de la boîte',
+    protonHv: 'Proton veut vérifier que vous êtes humain. Ouvrez la page de vérification, terminez-la, puis saisissez à nouveau votre mot de passe Proton.', protonHvOpen: 'Ouvrir la page de vérification',
+    protonAdded: '{email} est connecté à Bridge', protonAlready: '{email} était déjà connecté à Bridge',
+    bridgeBadge: 'Bridge', signOut2: 'Déconnecter', signedOut: 'Compte déconnecté de Bridge',
+    removeBridge: 'Retirer {email} de Bridge ? Ses données locales sur ce serveur sont supprimées et les assistants perdent l’accès. Saisissez l’adresse pour confirmer.', removeLabel: 'Adresse',
+    perr_username_password_error: 'Identifiant ou mot de passe Proton incorrect.', perr_free_user: 'Proton Mail Bridge nécessite une offre Proton payante.',
+    perr_connection_error: 'Bridge n’a pas pu joindre Proton. Réessayez.', perr_tfa_error: 'Code de double authentification incorrect.',
+    perr_tfa_abort: 'La double authentification a été interrompue. Recommencez.', perr_two_passwords_error: 'Mot de passe de la boîte incorrect.',
+    perr_two_passwords_abort: 'L’étape du mot de passe de la boîte a été interrompue. Recommencez.', perr_hv_error: 'La vérification humaine a échoué ou expiré. Recommencez.',
+    'perr_too-many-attempts': 'Trop de tentatives incorrectes. Recommencez.', perr_timeout: 'Bridge n’a pas répondu à temps.', perr_expired: 'Cette connexion a expiré. Recommencez.',
+    'perr_fido-unsupported': 'Ce compte exige une clé de sécurité, inutilisable ici. Ajoutez une application d’authentification au compte.',
+    perr_busy: 'Une autre connexion est en cours sur ce Bridge. Réessayez dans quelques minutes.', 'perr_stream-busy': 'Une autre application pilote ce Bridge (fenêtre Proton Bridge ?).',
+    perr_rate_limited: 'Trop de tentatives, réessayez plus tard.', 'perr_rate-limited': 'Trop de tentatives, réessayez plus tard.',
     forbidden: 'Vous n’êtes pas autorisé à utiliser ce serveur.'
   }
 };
@@ -181,13 +215,20 @@ async function api(path, { method = 'GET', body } = {}) {
   return data;
 }
 
-function confirmDialog(text, action) {
+/** Resolves true (or the typed text when `inputLabel` is given) on confirmation, false otherwise. */
+function confirmDialog(text, action, inputLabel) {
   const dlg = $('#confirm');
   $('#confirm-text').textContent = text;
   $('#confirm-yes').textContent = action;
+  $('#confirm-field').hidden = !inputLabel;
+  $('#confirm-label').textContent = inputLabel ?? '';
+  $('#confirm-input').value = '';
   dlg.returnValue = '';
   dlg.showModal();
-  return new Promise(resolve => dlg.addEventListener('close', () => resolve(dlg.returnValue === 'yes'), { once: true }));
+  if (inputLabel) $('#confirm-input').focus();
+  return new Promise(resolve =>
+    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'yes' ? (inputLabel ? $('#confirm-input').value.trim() || false : true) : false), { once: true })
+  );
 }
 
 async function copy(text, btn) {
@@ -230,7 +271,8 @@ const state = {
   users: [],
   discovery: null,
   mode: 'password', // 'password' | 'oauth'
-  oauthProvider: null
+  oauthProvider: null,
+  proton: null // Bridge Manager sign-in session in progress
 };
 
 const provider = id => state.me.providers.find(p => p.id === id);
@@ -253,6 +295,26 @@ async function boot() {
   });
   $('#use-password').addEventListener('click', () => setMode('password'));
   $('#oauth-btn').addEventListener('click', startOAuth);
+  $('#proton-btn').addEventListener('click', protonNext);
+  $('#proton-manual').addEventListener('click', () => {
+    $('#proton-box').hidden = true;
+    setMode('password');
+  });
+  for (const id of ['#proton-password', '#proton-step-input']) {
+    $(id).addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        protonNext();
+      }
+    });
+  }
+  $('#editor').addEventListener('close', () => {
+    // Closing the dialog abandons a sign-in in progress (frees Bridge's single sign-in slot).
+    if (state.proton && !['CONNECTED', 'FAILED', 'CANCELLED', 'EXPIRED', 'FIDO_REQUIRED'].includes(state.proton.state)) {
+      api(`/bridge/auth-sessions/${state.proton.id}/cancel`, { method: 'POST', body: {} }).catch(() => undefined);
+    }
+    state.proton = null;
+  });
   $('#provider-select').addEventListener('change', e => applyPreset(e.target.value, true));
   $('#test-btn').addEventListener('click', testFromForm);
   $('#save-btn').addEventListener('click', save);
@@ -366,6 +428,7 @@ function accountCard(a) {
   const st = state.status[a.id];
   const badges = [el('span', { class: 'badge accent' }, a.id), el('span', { class: 'badge' }, a.providerName)];
   if (a.auth.startsWith('oauth:')) badges.push(el('span', { class: 'badge' }, OAUTH_NAMES[a.auth.slice(6)] ?? 'OAuth'));
+  if (a.source === 'bridge') badges.push(el('span', { class: 'badge' }, t('bridgeBadge')));
   if (a.source === 'config') badges.push(el('span', { class: 'badge' }, t('fromConfig')));
   else if (a.mine && !state.me.local) badges.push(el('span', { class: 'badge' }, t('yours')));
   else if (!state.me.admin && !a.mine) badges.push(el('span', { class: 'badge' }, t('shared')));
@@ -384,6 +447,12 @@ function accountCard(a) {
   const testBtn = el('button', { class: 'btn sm', type: 'button', onclick: () => testSaved(a) }, icon('plug'), el('span', {}, st?.busy ? t('testing') : t('test')));
   testBtn.disabled = Boolean(st?.busy);
   const actions = [testBtn, el('span', { class: 'spacer' })];
+  if (a.bridge?.manageable) {
+    actions.push(
+      el('button', { class: 'btn sm ghost', type: 'button', onclick: () => bridgeLogout(a) }, icon('out'), el('span', { class: 'lbl' }, t('signOut2'))),
+      el('button', { class: 'btn sm ghost', type: 'button', onclick: () => bridgeRemove(a), 'aria-label': t('del') }, icon('trash'))
+    );
+  }
   if (a.editable) {
     actions.push(
       el('button', { class: 'btn sm ghost', type: 'button', onclick: () => openEditor(a), 'aria-label': t('edit') }, icon('edit'), el('span', { class: 'lbl' }, t('edit'))),
@@ -515,6 +584,17 @@ function renderDetails() {
     $('#save-btn').hidden = true;
   }
 
+  // Proton with the Bridge Manager: sign in to Proton instead of copying a Bridge password.
+  const viaManager = Boolean(p?.bridge && state.me.bridgeManager?.length && !editing && state.me.selfService);
+  $('#proton-box').hidden = !viaManager;
+  document.querySelectorAll('.generic-only').forEach(n => (n.hidden = viaManager));
+  if (viaManager) {
+    resetProton();
+    $('#password-box').hidden = true;
+    $('#test-btn').hidden = true;
+    $('#save-btn').hidden = true;
+  }
+
   // Password field labels and hints depend on the provider.
   const appUrl = p?.appPasswordUrl ?? d.appPasswordUrl;
   $('#password-label').textContent = p?.bridge ? t('fPassBridge') : appUrl ? t('fPassApp') : t('fPass');
@@ -570,6 +650,114 @@ function openEditor(a = null) {
   renderChips();
   $('#editor').showModal();
   (a ? f.displayName : f.email).focus();
+}
+
+// ------------------------------------------------------------------ Proton sign-in (Bridge Manager)
+
+function resetProton() {
+  state.proton = null;
+  $('#proton-start').hidden = false;
+  $('#proton-step').hidden = true;
+  $('#proton-password').value = '';
+  $('#proton-btn').textContent = t('protonSignIn');
+  $('#proton-manual').hidden = false;
+}
+
+/** Sign-in errors come with a stable code: show them in the interface language. */
+function protonError(error) {
+  if (!error) return '';
+  const key = `perr_${error.code}`;
+  return T[key] ?? I18N.en[key] ?? error.message;
+}
+
+function showProtonStep(view) {
+  state.proton = view;
+  const input = $('#proton-step-input');
+  input.value = '';
+  $('#proton-start').hidden = true;
+  $('#proton-step').hidden = false;
+  $('#proton-hv-link').hidden = view.state !== 'HV_REQUIRED';
+  const totp = view.state === 'TOTP_REQUIRED';
+  input.type = totp ? 'text' : 'password';
+  input.inputMode = totp ? 'numeric' : 'text';
+  input.autocomplete = totp ? 'one-time-code' : 'off';
+  if (totp) {
+    $('#proton-step-text').textContent = view.fidoAlsoAccepted ? t('protonTotpFido') : t('protonTotp');
+    $('#proton-step-label').textContent = t('protonTotpLabel');
+  } else if (view.state === 'MAILBOX_PASSWORD_REQUIRED') {
+    $('#proton-step-text').textContent = t('protonMailbox');
+    $('#proton-step-label').textContent = t('protonMailboxLabel');
+  } else {
+    $('#proton-step-text').textContent = t('protonHv');
+    $('#proton-step-label').textContent = t('protonPassword');
+    $('#proton-hv-link').href = view.hvUrl;
+  }
+  $('#proton-manual').hidden = true;
+  showFormError(view.state !== 'HV_REQUIRED' ? protonError(view.error) : '');
+  input.focus();
+}
+
+async function protonNext() {
+  const btn = $('#proton-btn');
+  if (btn.disabled) return;
+  showFormError('');
+  const f = $('#account-form');
+  btn.disabled = true;
+  btn.textContent = t('protonSigning');
+  try {
+    const s = state.proton;
+    let view;
+    if (!s) {
+      const password = $('#proton-password').value;
+      if (!password) return showFormError(t('protonPassword'));
+      view = await api('/bridge/auth-sessions', { method: 'POST', body: { instance: state.me.bridgeManager[0], username: f.email.value.trim(), password } });
+      $('#proton-password').value = '';
+    } else {
+      const value = $('#proton-step-input').value;
+      if (!value) return;
+      const step = s.state === 'TOTP_REQUIRED' ? ['totp', { code: value.trim() }] : s.state === 'MAILBOX_PASSWORD_REQUIRED' ? ['mailbox-password', { password: value }] : ['hv', { password: value }];
+      view = await api(`/bridge/auth-sessions/${s.id}/${step[0]}`, { method: 'POST', body: step[1] });
+      $('#proton-step-input').value = '';
+    }
+    if (view.state === 'CONNECTED') {
+      state.proton = view;
+      $('#editor').close();
+      toast(t(view.account.alreadyConfigured ? 'protonAlready' : 'protonAdded', { email: view.account.addresses[0] ?? view.account.username }));
+      await loadAccounts();
+      return;
+    }
+    if (['TOTP_REQUIRED', 'MAILBOX_PASSWORD_REQUIRED', 'HV_REQUIRED'].includes(view.state)) return showProtonStep(view);
+    resetProton();
+    showFormError(protonError(view.error) || view.state);
+  } catch (err) {
+    if (err.status === 404) resetProton();
+    showFormError(err.data?.code ? protonError(err.data) : err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = state.proton ? t('protonContinue') : t('protonSignIn');
+  }
+}
+
+async function bridgeLogout(a) {
+  try {
+    await api(`/bridge/instances/${encodeURIComponent(a.bridge.instance)}/accounts/${encodeURIComponent(a.bridge.userId)}/logout`, { method: 'POST', body: {} });
+    toast(t('signedOut'));
+    await loadAccounts();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+async function bridgeRemove(a) {
+  const typed = await confirmDialog(t('removeBridge', { email: a.email }), t('del'), t('removeLabel'));
+  if (!typed) return;
+  try {
+    await api(`/bridge/instances/${encodeURIComponent(a.bridge.instance)}/accounts/${encodeURIComponent(a.bridge.userId)}`, { method: 'DELETE', body: { confirm: typed } });
+    toast(t('deleted'));
+    await loadAccounts();
+  } catch (err) {
+    toast(err.message, true);
+  }
 }
 
 async function runDiscovery() {

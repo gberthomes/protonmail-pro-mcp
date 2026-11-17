@@ -16,6 +16,9 @@ import { AccountRegistry } from './mail/account.js';
 import { AccountDirectory } from './mail/directory.js';
 import { discover, settingsFromDiscovery } from './mail/discovery.js';
 import { MailOAuth } from './mail/oauth.js';
+import { BridgeAccountMetaStore, BridgeAccountSource } from './bridge-manager/accounts-source.js';
+import { loadInstances } from './bridge-manager/instance.js';
+import { BridgeManager } from './bridge-manager/manager.js';
 import { buildServer } from './server.js';
 import { VERSION } from './version.js';
 
@@ -53,7 +56,8 @@ async function main(): Promise<void> {
       })
   );
   const directory = new AccountDirectory(config.accounts, config.dataDir, config.auth.encryptionKey);
-  if (directory.list().length === 0) {
+  const bridgeManagerEnabled = process.env.BRIDGE_MANAGER === 'true' || Boolean(process.env.BRIDGE_MANAGER_INSTANCES || process.env.BRIDGE_MANAGER_INSTANCES_FILE);
+  if (directory.list().length === 0 && !bridgeManagerEnabled) {
     log.warn(
       config.transport === 'http'
         ? 'No Proton account configured yet: add one in the web interface (/admin) or with environment variables (see README.md).'
@@ -67,7 +71,17 @@ async function main(): Promise<void> {
     adminUsers: config.auth.adminUsers,
     selfService: config.auth.selfService
   });
-  const deps = { registry, policy, directory, oauth };
+  // Proton Bridge Manager: Proton accounts signed in to the official Bridge become mailboxes.
+  let bridgeManager: BridgeManager | undefined;
+  let bridgeSource: BridgeAccountSource | undefined;
+  if (bridgeManagerEnabled) {
+    bridgeManager = new BridgeManager(loadInstances(), { allowUntested: process.env.BRIDGE_MANAGER_ALLOW_UNTESTED === 'true' });
+    bridgeSource = new BridgeAccountSource(bridgeManager, new BridgeAccountMetaStore(config.dataDir), () => directory.ownIds(), () => directory.ownEmails());
+    directory.addSource(bridgeSource);
+    await bridgeSource.start(config.transport === 'http').catch(err => log.warn(`Proton Bridge Manager: ${err instanceof Error ? err.message : err}`));
+    log.info(`Proton Bridge Manager: ${bridgeSource.list().length} Bridge account(s) available`);
+  }
+  const deps = { registry, policy, directory, oauth, bridgeManager, bridgeSource };
 
   let shutdown: () => Promise<void>;
   if (config.transport === 'http') {
@@ -88,6 +102,9 @@ async function main(): Promise<void> {
     const force = setTimeout(() => process.exit(0), 5000);
     force.unref();
     await shutdown().catch(err => log.error('shutdown error', err));
+    bridgeSource?.stop();
+    // Detach gracefully: Bridge quits when its event stream is cut.
+    await bridgeManager?.close().catch(() => undefined);
     await registry.closeAll();
     process.exit(0);
   };

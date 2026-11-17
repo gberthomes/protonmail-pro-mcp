@@ -8,6 +8,7 @@ An [MCP](https://modelcontextprotocol.io) server to read, search, organize and s
 - **Multi-account**: as many mailboxes as you want, mixing Proton and other providers, with per-user access rules when served remotely.
 - **Autodiscovery**: type an address, the servers are found (built-in presets, the domain's autoconfig, the Mozilla ISPDB, MX records, DNS SRV, Microsoft Autodiscover, then guessing).
 - **Sign in with Google / Microsoft** (XOAUTH2) for Gmail and Outlook mailboxes, or app passwords.
+- **Proton Bridge Manager**: deploy and administer the *official, unmodified* Proton Mail Bridge on Linux — add Proton accounts to an empty Bridge (password, TOTP, mailbox password, human verification) from the web interface or the `bridge-manager` CLI, several accounts per Bridge, several Bridges per host; signed-in accounts become mailboxes automatically, with no Bridge password to copy. See [docs/bridge-manager.md](docs/bridge-manager.md).
 - **Web interface** (`/admin`): sign in with your identity provider, add and test mailboxes, share them, copy the connection address, revoke connected apps. Light (no framework, no build step), responsive, light/dark, English/French.
 
 ## Tools
@@ -199,6 +200,17 @@ Patterns: `alice@example.com`, `*@example.com`, `group:<name>` (from `OIDC_GROUP
 - **API keys** for scripts and clients without OAuth: `MCP_API_KEYS="<key>=robot@example.com,<key2>=bob@example.com"` (≥ 24 characters each; the identity on the right is matched against access rules). Send `Authorization: Bearer <key>`. Works alongside OIDC.
 - **Resource-server mode** (`MCP_AUTH=oidc-resource`): for an IdP that can itself register MCP clients (CIMD/DCR) and issue JWT access tokens with this server as audience (`OIDC_AUDIENCE`, default `https://<domain>/mcp`). The protected-resource metadata then points clients directly at your IdP.
 - **No auth**: only on `127.0.0.1` (default bind). Binding elsewhere without auth is refused unless `MCP_ALLOW_UNAUTHENTICATED=true` (for setups where a reverse proxy authenticates).
+
+## Proton Bridge Manager
+
+For Proton accounts on a server, the Manager drives the official Bridge for you instead of you copying Bridge passwords around:
+
+```bash
+sudo deploy/install-debian.sh            # verified official package, service user, keychain, systemd unit
+sudo -u protonmail-bridge BRIDGE_SETTINGS_DIR=/var/lib/protonmail-bridge/default/config/protonmail/bridge-v3 bridge-manager status
+```
+
+Then enable it in the MCP server (`BRIDGE_MANAGER=true` or `BRIDGE_MANAGER_INSTANCES_FILE`, running as the Bridge user) and add accounts with *Add account → Sign in to Proton* in the web interface, or `bridge-manager accounts add`. Everything about it — what was verified in Bridge's source, the compatibility matrix (Bridge **3.27.2** tested), security model, multi-instance modes and limitations — is in [docs/bridge-manager.md](docs/bridge-manager.md). Bridge's gRPC control interface is internal to Proton and not a public API.
 
 ## Endpoints
 

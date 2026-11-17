@@ -17,7 +17,13 @@ import type { MailOAuthProviderId } from './providers.js';
 
 const log = createLogger('accounts');
 
-export type AccountSource = 'config' | 'ui';
+export type AccountSource = 'config' | 'ui' | 'bridge';
+
+/** Accounts provided at runtime (e.g. by the Proton Bridge Manager). */
+export interface ExternalAccountSource {
+  list(): AccountEntry[];
+  onChange(fn: () => void): void;
+}
 
 export interface AccountEntry extends AccountConfig {
   source: AccountSource;
@@ -26,6 +32,8 @@ export interface AccountEntry extends AccountConfig {
   ownerEmail?: string;
   createdAt?: string;
   updatedAt?: string;
+  /** Accounts signed in to a Proton Bridge instance managed by this server. */
+  bridge?: { instance: string; userId: string; addresses: string[] };
 }
 
 interface StoredAccount {
@@ -78,6 +86,7 @@ export class AccountDirectory {
   private mtime = 0;
   private lastCheck = 0;
   private listeners = new Set<() => void>();
+  private readonly external: ExternalAccountSource[] = [];
 
   constructor(
     private readonly staticAccounts: AccountConfig[],
@@ -155,6 +164,20 @@ export class AccountDirectory {
     for (const l of this.listeners) l();
   }
 
+  addSource(source: ExternalAccountSource): void {
+    this.external.push(source);
+    source.onChange(() => this.emit());
+  }
+
+  /** Ids and addresses of configured (non-external) accounts. */
+  ownIds(): Set<string> {
+    return new Set(this.listOwn().map(a => a.id));
+  }
+
+  ownEmails(): Set<string> {
+    return new Set(this.listOwn().map(a => a.email));
+  }
+
   onChange(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -188,6 +211,13 @@ export class AccountDirectory {
   }
 
   list(): AccountEntry[] {
+    const own = this.listOwn();
+    const taken = new Set(own.map(a => a.id));
+    const extra = this.external.flatMap(s => s.list()).filter(a => !taken.has(a.id));
+    return [...own, ...extra];
+  }
+
+  private listOwn(): AccountEntry[] {
     this.reload();
     const fromConfig: AccountEntry[] = this.staticAccounts.map(a => ({ ...a, source: 'config' }));
     const taken = new Set(fromConfig.map(a => a.id));
